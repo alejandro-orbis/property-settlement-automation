@@ -1,0 +1,591 @@
+{
+  "name": "Workflow 1A - Importacion Rentila",
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyHour",
+              "minute": 1
+            }
+          ]
+        },
+        "triggerOn": "specificFolder",
+        "folderToWatch": {
+          "__rl": true,
+          "mode": "id",
+          "value": "REPLACE_WITH_YOUR_ID"
+        },
+        "event": "fileCreated",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleDriveTrigger",
+      "typeVersion": 1,
+      "position": [
+        560,
+        992
+      ],
+      "id": "e55bba22-2c80-4356-90ca-dfcdfc81a53e",
+      "name": "Google Drive Trigger",
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "REPLACE_ME",
+          "name": "googleDriveOAuth2Api (replace)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "download",
+        "fileId": {
+          "__rl": true,
+          "value": "REPLACE_WITH_YOUR_FILEID",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        768,
+        992
+      ],
+      "id": "28d48490-ff82-4539-bec2-4afddf43c4df",
+      "name": "Download file",
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "REPLACE_ME",
+          "name": "googleDriveOAuth2Api (replace)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "xlsx",
+        "options": {
+          "headerRow": false,
+          "range": "A4:I1000",
+          "sheetName": "Finanzas"
+        }
+      },
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1.1,
+      "position": [
+        976,
+        896
+      ],
+      "id": "6680230d-cf54-435d-8135-eaefdf331dda",
+      "name": "Extract from File"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst rows = items.map(item => item.json.row);\n\nconst headerIndex = rows.findIndex(r => Array.isArray(r) && r.includes('FECHA'));\nif (headerIndex === -1) {\n  throw new Error('No se encontró la fila de cabecera con \"FECHA\"');\n}\nconst headers = rows[headerIndex].map(h => String(h).trim());\n\nfunction excelDateToJSDate(serial) {\n  if (serial === undefined || serial === null || serial === '') return null;\n  const utc_days = Math.floor(serial - 25569);\n  const utc_value = utc_days * 86400;\n  const date = new Date(utc_value * 1000);\n  return date.toISOString().split('T')[0];\n}\n\nfunction decodeHtmlEntities(text) {\n  if (!text || typeof text !== 'string') return text;\n  const entities = {\n    '&aacute;': 'á', '&eacute;': 'é', '&iacute;': 'í', '&oacute;': 'ó', '&uacute;': 'ú',\n    '&ntilde;': 'ñ', '&Aacute;': 'Á', '&Eacute;': 'É', '&Iacute;': 'Í', '&Oacute;': 'Ó',\n    '&Uacute;': 'Ú', '&Ntilde;': 'Ñ', '&amp;': '&', '&quot;': '\"', '&#39;': \"'\"\n  };\n  return text.replace(/&[a-zA-Z]+;|&#\\d+;/g, match => entities[match] || match);\n}\n\nconst result = [];\nfor (let i = headerIndex + 1; i < rows.length; i++) {\n  const row = rows[i];\n  if (!Array.isArray(row) || row.length === 0) continue;\n\n  const obj = {};\n  headers.forEach((h, idx) => {\n    obj[h] = row[idx] !== undefined ? row[idx] : null;\n  });\n\n  // Separar código de propiedad y dirección (formato \"DEMO_001 – Calle Ejemplo 1\")\n  const propiedadTexto = obj['PROPIEDAD'] || '';\n  const partes = propiedadTexto.split('–').map(p => p.trim());\n  const codigoRentila = partes[0] || null;\n  const direccion = partes[1] || propiedadTexto;\n\n  const parsedRow = {\n    fecha: excelDateToJSDate(obj['FECHA']),\n    codigo_rentila: codigoRentila,\n    direccion_propiedad: direccion,\n    de_a: obj['DE/A'] || null,\n    monto: obj['MONTO'] !== null && obj['MONTO'] !== undefined ? Number(obj['MONTO']) : null,\n    tipo: obj['TIPO'] || null,\n    descripcion: decodeHtmlEntities(obj['DESCRIPCION']) || null,\n    estado: obj['ESTADO'] || null,\n    pagado_en: excelDateToJSDate(obj['PAGADO EN']),\n    pago: obj['PAGO'] || null\n  };\n\n  result.push({\n    json: {\n      ...parsedRow,\n      origen_raw: JSON.stringify(obj)\n    }\n  });\n}\n\nreturn result;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1184,
+        896
+      ],
+      "id": "9f0d6681-156f-4091-9e1d-878cd338c92e",
+      "name": "Parsear Finanzas"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO propiedades (codigo_rentila, direccion)\nVALUES ('{{ $json.codigo_rentila }}', '{{ $json.direccion_propiedad }}')\nON CONFLICT (codigo_rentila) DO UPDATE SET direccion = EXCLUDED.direccion\nRETURNING id;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1392,
+        896
+      ],
+      "id": "fdbdbd42-ddbe-48bd-9cb7-3210e273ae44",
+      "name": "Upsert Propiedad",
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_ME",
+          "name": "postgres (replace)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO movimientos (propiedad_id, fecha, de_a, monto, tipo, descripcion, estado, pagado_en, referencia_pago, origen_raw)\nVALUES (\n  {{ $json.id }},\n  '{{ $('Parsear Finanzas').item.json.fecha }}',\n  '{{ $('Parsear Finanzas').item.json.de_a }}',\n  {{ $('Parsear Finanzas').item.json.monto }},\n  '{{ $('Parsear Finanzas').item.json.tipo }}',\n  '{{ $('Parsear Finanzas').item.json.descripcion.replace(/'/g, \"''\") }}',\n  '{{ $('Parsear Finanzas').item.json.estado }}',\n  {{ $('Parsear Finanzas').item.json.pagado_en ? \"'\" + $('Parsear Finanzas').item.json.pagado_en + \"'\" : 'NULL' }},\n  {{ $('Parsear Finanzas').item.json.pago ? \"'\" + $('Parsear Finanzas').item.json.pago.replace(/'/g, \"''\") + \"'\" : 'NULL' }},\n  '{{ $('Parsear Finanzas').item.json.origen_raw.replace(/'/g, \"''\") }}'::jsonb\n)\nON CONFLICT (propiedad_id, fecha, de_a, monto, tipo, descripcion) DO NOTHING;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1600,
+        896
+      ],
+      "id": "fe4d11e6-86bb-4412-a6d8-bef4e041843c",
+      "name": "Insert Movimientos",
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_ME",
+          "name": "postgres (replace)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "xlsx",
+        "options": {
+          "range": "A1:Z1000",
+          "sheetName": "Regularización bancaria"
+        }
+      },
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1.1,
+      "position": [
+        976,
+        1120
+      ],
+      "id": "4ca768b1-7fd9-4b3a-b140-0c582804922e",
+      "name": "Extraer Regularizacion"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\nfunction excelDateToJSDate(serial) {\n  if (serial === undefined || serial === null || serial === '') return null;\n  const utc_days = Math.floor(serial - 25569);\n  const utc_value = utc_days * 86400;\n  const date = new Date(utc_value * 1000);\n  return date.toISOString().split('T')[0];\n}\n\nfunction decodeHtmlEntities(text) {\n  if (!text || typeof text !== 'string') return text;\n  const entities = {\n    '&aacute;': 'á', '&eacute;': 'é', '&iacute;': 'í', '&oacute;': 'ó', '&uacute;': 'ú',\n    '&ntilde;': 'ñ', '&Aacute;': 'Á', '&Eacute;': 'É', '&Iacute;': 'Í', '&Oacute;': 'Ó',\n    '&Uacute;': 'Ú', '&Ntilde;': 'Ñ', '&amp;': '&', '&quot;': '\"', '&#39;': \"'\"\n  };\n  return text.replace(/&[a-zA-Z]+;|&#\\d+;/g, match => entities[match] || match);\n}\n\nconst result = [];\nfor (const item of items) {\n  const obj = item.json;\n  if (!obj['FECHA']) continue; // salta filas vacías si las hay\n\n  const habitacionTexto = obj['HABITACIÓN'] || '';\n  const partes = habitacionTexto.split('–').map(p => p.trim());\n  const codigoRentila = partes[0] || null;\n  const direccion = partes[1] || habitacionTexto;\n\n  result.push({\n    json: {\n      fecha: excelDateToJSDate(obj['FECHA']),\n      codigo_rentila: codigoRentila,\n      direccion_propiedad: direccion,\n      de_a: obj['DE/A'] || null,\n      monto: obj['MONTO'] !== null && obj['MONTO'] !== undefined ? Number(obj['MONTO']) : null,\n      tipo: obj['TIPO'] || null,\n      descripcion: decodeHtmlEntities(obj['DESCRIPCION']) || null,\n      referencia_pago: obj['PAGO'] || null,\n      metodo_pago: obj['MÉTODO DE PAGO'] || null,\n      origen_raw: JSON.stringify(obj)\n    }\n  });\n}\n\nreturn result;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1184,
+        1120
+      ],
+      "id": "5e32f246-572e-45f2-a1c6-543d03333c05",
+      "name": "Parsear Regularizacion"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO propiedades (codigo_rentila, direccion)\nVALUES ('{{ $json.codigo_rentila }}', '{{ $json.direccion_propiedad }}')\nON CONFLICT (codigo_rentila) DO UPDATE SET direccion = EXCLUDED.direccion\nRETURNING id;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1392,
+        1120
+      ],
+      "id": "6031a723-52e0-463a-83a0-3c882618723a",
+      "name": "Upsert Propiedad2",
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_ME",
+          "name": "postgres (replace)"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        1840,
+        992
+      ],
+      "id": "147f7af6-ac29-40db-8b86-580fcff62421",
+      "name": "Merge"
+    },
+    {
+      "parameters": {
+        "jsCode": "const movimientos = $('Parsear Finanzas').all().length;\nconst regularizacion = $('Parsear Regularizacion').all().length;\n\nreturn [{\n  json: {\n    movimientos_importados: movimientos,\n    regularizacion_importada: regularizacion,\n    total: movimientos + regularizacion\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2048,
+        992
+      ],
+      "id": "49551b8e-1bee-4067-9173-ca04651b8867",
+      "name": "Preparar Log"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "rWsQVLC3hGipY6oO",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/rWsQVLC3hGipY6oO",
+          "cachedResultName": "Logs - Subworkflow"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "duracion_ms": 0,
+            "liquidaciones_generadas": 0,
+            "errores_detectados": 0,
+            "workflow_origen": "Workflow 1A - Importacion Rentila",
+            "tipo_evento": "info",
+            "disparado_por": "automatico",
+            "payload": "={{ JSON.stringify($json) }}",
+            "inicio": "={{ $now.toISO() }}",
+            "fin": "={{ $now.toISO() }}",
+            "propiedades_procesadas": 1
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "workflow_origen",
+              "displayName": "workflow_origen",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "tipo_evento",
+              "displayName": "tipo_evento",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "disparado_por",
+              "displayName": "disparado_por",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "inicio",
+              "displayName": "inicio",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "fin",
+              "displayName": "fin",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "duracion_ms",
+              "displayName": "duracion_ms",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "number",
+              "removed": false
+            },
+            {
+              "id": "propiedades_procesadas",
+              "displayName": "propiedades_procesadas",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "number",
+              "removed": false
+            },
+            {
+              "id": "liquidaciones_generadas",
+              "displayName": "liquidaciones_generadas",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "number",
+              "removed": false
+            },
+            {
+              "id": "errores_detectados",
+              "displayName": "errores_detectados",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "number",
+              "removed": false
+            },
+            {
+              "id": "payload",
+              "displayName": "payload",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        2256,
+        992
+      ],
+      "id": "33c179b1-482c-48ae-bf76-949ca47bbedf",
+      "name": "Execute Workflow (Logs)"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO regularizacion_bancaria (propiedad_id, fecha, de_a, monto, tipo, descripcion, referencia_pago, metodo_pago, origen_raw)\nVALUES (\n  {{ $json.id }},\n  '{{ $('Parsear Regularizacion').item.json.fecha }}',\n  '{{ $('Parsear Regularizacion').item.json.de_a }}',\n  {{ $('Parsear Regularizacion').item.json.monto }},\n  '{{ $('Parsear Regularizacion').item.json.tipo }}',\n  '{{ $('Parsear Regularizacion').item.json.descripcion.replace(/'/g, \"''\") }}',\n  {{ $('Parsear Regularizacion').item.json.referencia_pago ? \"'\" + $('Parsear Regularizacion').item.json.referencia_pago.replace(/'/g, \"''\") + \"'\" : 'NULL' }},\n  {{ $('Parsear Regularizacion').item.json.metodo_pago ? \"'\" + $('Parsear Regularizacion').item.json.metodo_pago.replace(/'/g, \"''\") + \"'\" : 'NULL' }},\n  '{{ $('Parsear Regularizacion').item.json.origen_raw.replace(/'/g, \"''\") }}'::jsonb\n)\nON CONFLICT (propiedad_id, fecha, de_a, monto, tipo, descripcion) DO NOTHING;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1600,
+        1120
+      ],
+      "id": "0a221c7b-52b8-497f-87e4-af951e3dbcc4",
+      "name": "Insert Regularizacion",
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_ME",
+          "name": "postgres (replace)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "NA2amEDgkes8DXaq",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/NA2amEDgkes8DXaq",
+          "cachedResultName": "Workflow 2 - Normalizacion"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        2464,
+        992
+      ],
+      "id": "9e25401f-8f81-43ac-8ab2-bff20c2b2588",
+      "name": "Execute Workflow (Workflow 2)"
+    },
+    {
+      "parameters": {
+        "content": "## Workflow 1A · Importación Rentila\n**Fase:** 1 · Entrada de datos\n\n**Qué hace**\nLee el Excel que exporta Rentila y vuelca sus movimientos a PostgreSQL.\n\n**Cómo funciona**\n1. Drive Trigger: detecta un archivo nuevo en la carpeta de Rentila (solo el nivel raíz, no subcarpetas).\n2. Descarga el Excel y extrae las pestañas \"Finanzas\" y \"Regularización bancaria\".\n3. Inserta en `movimientos` y `regularizacion_bancaria`.\n4. Antiduplicados: restricción única + `ON CONFLICT DO NOTHING`. Se puede volver a subir el mismo archivo sin duplicar.\n\n**Siguiente:** Workflow 2 (Normalización)\n**Tablas:** `movimientos`, `regularizacion_bancaria`\n**Ojo:** el ID de la carpeta vigilada está fijado en el trigger (no admite expresiones).",
+        "height": 608,
+        "width": 976
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        64,
+        128
+      ],
+      "typeVersion": 1,
+      "id": "42df8795-bf57-4bc7-bce0-131426faa7a2",
+      "name": "Sticky Note"
+    }
+  ],
+  "connections": {
+    "Google Drive Trigger": {
+      "main": [
+        [
+          {
+            "node": "Download file",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download file": {
+      "main": [
+        [
+          {
+            "node": "Extract from File",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Extraer Regularizacion",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract from File": {
+      "main": [
+        [
+          {
+            "node": "Parsear Finanzas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parsear Finanzas": {
+      "main": [
+        [
+          {
+            "node": "Upsert Propiedad",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upsert Propiedad": {
+      "main": [
+        [
+          {
+            "node": "Insert Movimientos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert Movimientos": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extraer Regularizacion": {
+      "main": [
+        [
+          {
+            "node": "Parsear Regularizacion",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parsear Regularizacion": {
+      "main": [
+        [
+          {
+            "node": "Upsert Propiedad2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upsert Propiedad2": {
+      "main": [
+        [
+          {
+            "node": "Insert Regularizacion",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "Preparar Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar Log": {
+      "main": [
+        [
+          {
+            "node": "Execute Workflow (Logs)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert Regularizacion": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Execute Workflow (Logs)": {
+      "main": [
+        [
+          {
+            "node": "Execute Workflow (Workflow 2)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "timeSavedMode": "fixed",
+    "timezone": "Europe/Madrid",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false,
+    "errorWorkflow": "nzlatDFUYGWhzgoh"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "id": "PCWFIhqOZzeVy6lZ",
+  "tags": [
+    {
+      "name": "1-entrada"
+    },
+    {
+      "name": "liquidaciones"
+    },
+    {
+      "name": "automático"
+    }
+  ]
+}

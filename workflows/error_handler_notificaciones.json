@@ -1,0 +1,137 @@
+{
+  "name": "Error Handler - Notificaciones",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        32,
+        688
+      ],
+      "id": "99c00d91-7258-4043-a91d-e7125e3932f2",
+      "name": "Error Trigger"
+    },
+    {
+      "parameters": {
+        "jsCode": "const error = $input.first().json;\n\nconst workflowNombre = error.workflow?.name || 'Desconocido';\nconst nodoNombre = error.execution?.lastNodeExecuted || 'Desconocido';\nconst mensajeError = error.execution?.error?.message || JSON.stringify(error).substring(0, 500);\nconst fecha = new Date().toISOString();\n\nreturn [{\n  json: {\n    workflow_nombre: workflowNombre,\n    nodo_nombre: nodoNombre,\n    mensaje_error: mensajeError,\n    fecha: fecha,\n    texto_email: `Se ha producido un error en el sistema de liquidaciones.\\n\\nWorkflow: ${workflowNombre}\\nNodo: ${nodoNombre}\\nError: ${mensajeError}\\nFecha: ${fecha}\\n\\nRevisa el sistema cuanto antes.`\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        688
+      ],
+      "id": "b36f5d52-b1db-4ff3-b6cd-1b18a7005f52",
+      "name": "Formatear Error"
+    },
+    {
+      "parameters": {
+        "sendTo": "user@example.com",
+        "subject": "={{ '⚠️ Error en sistema de liquidaciones - ' + $json.workflow_nombre }}",
+        "message": "={{ $json.texto_email }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        464,
+        608
+      ],
+      "id": "08b41dc7-f2ef-4468-ada5-473eca991e94",
+      "name": "Enviar Alerta",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "REPLACE_ME",
+          "name": "gmailOAuth2 (replace)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO logs (workflow_origen, tipo_evento, disparado_por, inicio, fin, errores_detectados, payload)\nVALUES (\n  '{{ $json.workflow_nombre }}',\n  'error',\n  'automatico',\n  '{{ $json.fecha }}',\n  '{{ $json.fecha }}',\n  1,\n  '{{ JSON.stringify($json).replace(/'/g, \"''\") }}'::jsonb\n);",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        464,
+        816
+      ],
+      "id": "a3a1ffc1-766f-4673-94c7-0210928778b1",
+      "name": "Registrar Error en Logs",
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_ME",
+          "name": "postgres (replace)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Error Handler · Notificaciones\n**Fase:** Soporte\n\n**Qué hace**\nSe dispara cuando un workflow falla en una ejecución automática. Avisa por email y deja constancia en la base de datos.\n\n**Cómo funciona**\n1. Error Trigger: recibe el fallo de cualquier workflow que lo tenga configurado como \"Error Workflow\" (Settings del workflow).\n2. `Formatear Error`: extrae workflow, último nodo ejecutado, mensaje y fecha, y compone el texto del email.\n3. En paralelo:\n   - `Enviar Alerta` (Gmail): asunto \"⚠️ Error en sistema de liquidaciones - <workflow>\".\n   - `Registrar Error en Logs` (PostgreSQL): inserta una fila `tipo_evento = 'error'` en `logs`.\n\n**Destinatario actual:** user@example.com (nodo \"Enviar Alerta\").\n**Ojo:** solo avisa en ejecuciones automáticas, no al probar a mano en el editor.\n**Ojo:** depende de la credencial de Gmail. Si se revoca, las alertas dejan de llegar (el registro en `logs` sigue funcionando).",
+        "height": 528,
+        "width": 1232,
+        "color": 5
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        0,
+        0
+      ],
+      "typeVersion": 1,
+      "id": "ac9e9d74-6af6-4b95-9845-534ba64528c3",
+      "name": "Sticky Note"
+    }
+  ],
+  "connections": {
+    "Error Trigger": {
+      "main": [
+        [
+          {
+            "node": "Formatear Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Formatear Error": {
+      "main": [
+        [
+          {
+            "node": "Registrar Error en Logs",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Enviar Alerta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "id": "nzlatDFUYGWhzgoh",
+  "tags": [
+    {
+      "name": "soporte"
+    },
+    {
+      "name": "liquidaciones"
+    },
+    {
+      "name": "automático"
+    }
+  ]
+}

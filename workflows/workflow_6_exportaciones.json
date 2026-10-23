@@ -1,0 +1,1165 @@
+{
+  "name": "Workflow 6 - Exportaciones",
+  "nodes": [
+    {
+      "parameters": {
+        "jsCode": "const l = $('Leer Liquidación').item.json;\nconst d = typeof l.detalle_calculo === 'string' ? JSON.parse(l.detalle_calculo) : (l.detalle_calculo || {});\n\nconst IVA = 0.21;\nconst r2 = n => Math.round((n + Number.EPSILON) * 100) / 100;\nconst num = v => parseFloat(v) || 0;\nconst eur = n => {\n  const [i, dec] = Math.abs(n).toFixed(2).split('.');\n  return (n < 0 ? '-' : '') + i.replace(/\\B(?=(\\d{3})+(?!\\d))/g, '.') + ',' + dec + ' €';\n};\n\nconst fechaCorregida = new Date(new Date(l.mes).getTime() + 24 * 60 * 60 * 1000);\nconst meses = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];\nconst mesNombre = `${meses[fechaCorregida.getUTCMonth()]} de ${fechaCorregida.getUTCFullYear()}`;\n\nconst ingresos = num(l.ingresos), gastos = num(l.gastos), honorarios = num(l.honorarios_gestion);\nconst ivaTotal = num(l.iva), rotaciones = num(l.rotaciones), reparaciones = num(l.reparaciones), neto = num(l.neto_propietario);\nconst cobroDirecto = !!d.nota_cobro_directo;\n\n// Desglose de lo que se descuenta en la liquidación\nconst rotTrad = num(d.rotaciones_tradicional_deducida);\nconst rotHab = r2(rotaciones - rotTrad);\nlet colab = r2(ivaTotal / IVA - (honorarios + gastos + reparaciones + rotaciones)); // colaboradores repercutidos\nif (Math.abs(colab) < 0.05) colab = 0;\nconst otros = r2(gastos + colab);\n\nconst mkFila = (c, s) => { const iva = r2(s * IVA); return { c, s, iva, t: r2(s + iva) }; };\nconst filaHtml = f => `<tr><td>${f.c}</td><td class=\"n\">${eur(f.s)}</td><td class=\"n\">${eur(f.iva)}</td><td class=\"n\">${eur(f.t)}</td></tr>`;\nconst suma = (rows, k) => r2(rows.reduce((a, f) => a + f[k], 0));\n\n// Bloque 1: factura mensual descontada de liquidación\nconst mes = [\n  mkFila('Honorarios de gestión', cobroDirecto ? 0 : honorarios),\n  mkFila('Rotación habitación propietario', rotHab),\n  mkFila('Rotación tradicional propietario', rotTrad),\n  mkFila('Reparación y conservación', reparaciones),\n  mkFila('Otros cargos compensados', otros),\n];\nconst totMes = { s: suma(mes, 's'), iva: suma(mes, 'iva'), t: suma(mes, 't') };\n\nlet controlTxt = '—', controlAviso = false;\nif (!cobroDirecto && l.estado !== 'factura_aparte') {\n  let ctrl = r2(ingresos - neto - totMes.t);\n  if (Math.abs(ctrl) < 0.05) ctrl = 0;\n  controlTxt = eur(ctrl);\n  controlAviso = ctrl !== 0;\n}\n\n// Bloque 2: cuenta a cobrar / facturas aparte\nconst sumaArr = (arr, k) => (arr || []).reduce((a, x) => a + num(x[k]), 0);\nconst aparte = [\n  mkFila('Gestión — propietario cobra directamente', cobroDirecto ? honorarios : 0),\n  mkFila('Rotación tradicional propietario', r2(sumaArr(d.rotaciones_tradicional_factura_aparte, 'base'))),\n  mkFila('Rotación habitación propietario', 0),\n  mkFila('Reparación y conservación', r2(sumaArr(d.reparaciones_factura_aparte, 'facturado'))),\n  mkFila('Otro cargo a propietario', 0),\n];\nconst totAparte = { s: suma(aparte, 's'), iva: suma(aparte, 'iva'), t: suma(aparte, 't') };\n\nconst modalidad = d.tipo_gestion ? d.tipo_gestion.charAt(0).toUpperCase() + d.tipo_gestion.slice(1) : '';\n\nconst html = `\n<!DOCTYPE html>\n<html>\n<head>\n<meta charset=\"utf-8\">\n<style>\n  body { font-family: Arial, sans-serif; padding: 36px; color: #1a1a1a; font-size: 13px; }\n  h1 { font-size: 16px; color: #1f3864; margin: 0 0 4px 0; }\n  .sub { color: #555; margin-bottom: 18px; }\n  table { width: 100%; border-collapse: collapse; margin-bottom: 18px; }\n  td { padding: 6px 8px; border-bottom: 1px solid #d9d9d9; }\n  .n { text-align: right; white-space: nowrap; }\n  .info td { background: #ddebf7; border-bottom: 1px solid #fff; }\n  .info td:first-child { font-weight: bold; width: 28%; }\n  .bar td { background: #1f3864; color: #fff; font-weight: bold; text-align: center; letter-spacing: .3px; }\n  .head td { background: #ddebf7; font-weight: bold; text-align: center; }\n  .tot td { background: #e2efda; font-weight: bold; }\n  .ctl td { background: #f2f7fb; }\n  .gen td { background: #fff2cc; font-weight: bold; }\n  .aviso { background: #fff2cc; border: 1px solid #ffc107; padding: 10px; margin-top: 10px; font-size: 12px; font-style: italic; }\n</style>\n</head>\n<body>\n  <h1>Liquidación mensual — ${mesNombre}</h1>\n  <div class=\"sub\">${l.direccion} (${l.codigo_rentila})</div>\n\n  <table class=\"info\">\n    <tr><td>Propietario</td><td>${l.propietario_nombre || ''}</td></tr>\n    <tr><td>Modalidad</td><td>${modalidad}</td></tr>\n    <tr><td>Cobra alquiler</td><td>${cobroDirecto ? 'Propietario' : 'Management Co.'}</td></tr>\n  </table>\n\n  <table>\n    <tr class=\"bar\"><td colspan=\"4\">FACTURA MENSUAL — DESCONTADA DE LIQUIDACIÓN</td></tr>\n    <tr class=\"head\"><td>Concepto</td><td>Subtotal</td><td>IVA</td><td>Total</td></tr>\n    ${mes.map(filaHtml).join('')}\n    <tr class=\"tot\"><td>TOTAL FACTURA SPEEDINVOICE</td><td class=\"n\">${eur(totMes.s)}</td><td class=\"n\">${eur(totMes.iva)}</td><td class=\"n\">${eur(totMes.t)}</td></tr>\n    <tr class=\"ctl\"><td colspan=\"3\">CONTROL: debe ser 0,00 €</td><td class=\"n\">${controlTxt}</td></tr>\n  </table>\n  ${controlAviso ? `<div class=\"aviso\">Si el control no es 0,00 €, revisa REGISTRO antes de facturar.</div>` : ''}\n\n  <table>\n    <tr class=\"bar\"><td colspan=\"4\">CUENTA A COBRAR / FACTURAS APARTE</td></tr>\n    <tr class=\"head\"><td>Concepto</td><td>Subtotal</td><td>IVA</td><td>Total</td></tr>\n    ${aparte.map(filaHtml).join('')}\n    <tr class=\"gen\"><td>TOTAL GENERADO ESTE MES</td><td class=\"n\">${eur(totAparte.s)}</td><td class=\"n\">${eur(totAparte.iva)}</td><td class=\"n\">${eur(totAparte.t)}</td></tr>\n  </table>\n\n  ${l.estado === 'pendiente' ? `<div class=\"aviso\">Esta liquidación tiene movimientos pendientes de revisión manual antes de cerrarse definitivamente.</div>` : ''}\n  ${cobroDirecto ? `<div class=\"aviso\">El inquilino paga el alquiler directamente al propietario. La gestora no transfiere ningún importe: los honorarios de gestión se facturan aparte.</div>` : ''}\n</body>\n</html>\n`;\nreturn [{ json: { html: html, propiedad_id: l.propiedad_id, mes: l.mes } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1712,
+        912
+      ],
+      "id": "e0f680e2-ad79-4fce-94f0-7f6cbe7a20b8",
+      "name": "Generar HTML"
+    },
+    {
+      "parameters": {
+        "operation": "toText",
+        "sourceProperty": "html",
+        "options": {
+          "fileName": "index.html"
+        }
+      },
+      "type": "n8n-nodes-base.convertToFile",
+      "typeVersion": 1.1,
+      "position": [
+        1968,
+        912
+      ],
+      "id": "d043f15d-68ec-47dc-a9ae-243a306eeb16",
+      "name": "Move Binary Data"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=http://gotenberg:3000/forms/chromium/convert/html",
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "parameterType": "formBinaryData",
+              "name": "files",
+              "inputDataFieldName": "data"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file",
+              "outputPropertyName": "pdf"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2224,
+        912
+      ],
+      "id": "723d3afe-1aa0-4a43-9680-ccb3ba37032f",
+      "name": "Convertir a PDF"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT l.*, p.direccion, p.codigo_rentila, pr.nombre AS propietario_nombre, pr.nif AS propietario_nif, pr.email AS propietario_email\nFROM liquidaciones l\nJOIN propiedades p ON p.id = l.propiedad_id\nLEFT JOIN propietarios pr ON pr.id = p.propietario_id\nWHERE l.id = {{ $json.id }};",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        928,
+        1056
+      ],
+      "id": "80fa3951-7379-48f7-94db-18bd4e38d3f2",
+      "name": "Leer Liquidación",
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_ME",
+          "name": "postgres (replace)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const l = $input.first().json;\n\nconst fechaOriginal = new Date(l.mes);\nconst fechaCorregida = new Date(fechaOriginal.getTime() + 24 * 60 * 60 * 1000);\nconst meses = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];\nconst mesNombre = `${meses[fechaCorregida.getUTCMonth()]} ${fechaCorregida.getUTCFullYear()}`;\n\nconst ivaPct = 0.21;\nconst detalle = typeof l.detalle_calculo === 'string' ? JSON.parse(l.detalle_calculo) : l.detalle_calculo;\n\nconst num = v => parseFloat(v) || 0;\nconst r2 = n => Math.round((n + Number.EPSILON) * 100) / 100;\nconst mkConcepto = (concepto, subtotal) => {\n  const s = r2(subtotal);\n  const iva = r2(s * ivaPct);\n  return { concepto, subtotal: s, iva, total: r2(s + iva) };\n};\n\n// Construir líneas de concepto, cada una con su propio subtotal/IVA/total\nconst conceptos = [];\n\nif (l.honorarios_gestion > 0) {\n  const subtotal = parseFloat(l.honorarios_gestion);\n  conceptos.push({\n    concepto: 'Honorarios de gestión',\n    subtotal: subtotal,\n    iva: Math.round(subtotal * ivaPct * 100) / 100,\n    total: Math.round(subtotal * (1 + ivaPct) * 100) / 100\n  });\n}\n\nconst rotTrad = num(detalle.rotaciones_tradicional_deducida);\nconst rotHab = r2(num(l.rotaciones) - rotTrad);\nif (rotHab > 0) conceptos.push(mkConcepto('Rotación habitación propietario', rotHab));\nif (rotTrad > 0) conceptos.push(mkConcepto('Rotación tradicional propietario', rotTrad));\n\nif (detalle.reparaciones_detalle && detalle.reparaciones_detalle.length > 0) {\n  const subtotalRep = detalle.reparaciones_detalle.reduce((s, r) => s + r.facturado, 0);\n  conceptos.push({\n    concepto: 'Reparación y conservación',\n    subtotal: Math.round(subtotalRep * 100) / 100,\n    iva: Math.round(subtotalRep * ivaPct * 100) / 100,\n    total: Math.round(subtotalRep * (1 + ivaPct) * 100) / 100\n  });\n}\n\nlet colab = r2(num(l.iva) / ivaPct - (num(l.honorarios_gestion) + num(l.gastos) + num(l.reparaciones) + num(l.rotaciones)));\nif (Math.abs(colab) < 0.05) colab = 0;\nconst otros = r2(num(l.gastos) + colab);\nif (otros > 0) conceptos.push(mkConcepto('Otros cargos compensados', otros));\n\nconst totalFactura = conceptos.reduce((s, c) => s + c.total, 0);\nconst totalSubtotal = conceptos.reduce((s, c) => s + c.subtotal, 0);\nconst totalIva = conceptos.reduce((s, c) => s + c.iva, 0);\n\nconst tablaTexto = conceptos.map(c =>\n  `${c.concepto.padEnd(35)} ${c.subtotal.toFixed(2).padStart(10)}€ ${c.iva.toFixed(2).padStart(10)}€ ${c.total.toFixed(2).padStart(10)}€`\n).join('\\n');\n\nconst textoParaCopiar = `\nCLIENTE: ${l.propietario_nombre || '⚠️ SIN ASIGNAR'}\nNIF: ${l.propietario_nif || '⚠️ SIN ASIGNAR'}\nEMAIL: ${l.propietario_email || '⚠️ SIN ASIGNAR'}\nCONCEPTO GENERAL: Gestión ${l.direccion} — ${mesNombre}\n\n${'Concepto'.padEnd(35)} ${'Subtotal'.padStart(11)} ${'IVA'.padStart(11)} ${'Total'.padStart(11)}\n${tablaTexto}\n${'-'.repeat(70)}\n${'TOTAL FACTURA SPEEDINVOICE'.padEnd(35)} ${totalSubtotal.toFixed(2).padStart(10)}€ ${totalIva.toFixed(2).padStart(10)}€ ${totalFactura.toFixed(2).padStart(10)}€\n`.trim();\n\nreturn [{\n  json: {\n    cliente_nombre: l.propietario_nombre,\n    cliente_nif: l.propietario_nif,\n    cliente_email: l.propietario_email,\n    conceptos: conceptos,\n    total_subtotal: Math.round(totalSubtotal * 100) / 100,\n    total_iva: Math.round(totalIva * 100) / 100,\n    total_factura: Math.round(totalFactura * 100) / 100,\n    texto_para_copiar: textoParaCopiar\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1584,
+        1376
+      ],
+      "id": "164a20e8-3ffd-4954-8b05-d6fbaf6f14d8",
+      "name": "Datos SpeedInvoice"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE liquidaciones\nSET datos_speedinvoice = '{{ $json.texto_para_copiar.replace(/'/g, \"''\") }}'\nWHERE id = {{ $('Leer Liquidación').item.json.id }};",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1856,
+        1280
+      ],
+      "id": "ef178e4a-2ffa-46ab-bc6d-910d643895d6",
+      "name": "Guardar Datos SpeedInvoice",
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_ME",
+          "name": "postgres (replace)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "toText",
+        "sourceProperty": "=texto_para_copiar",
+        "options": {
+          "fileName": "speedinvoice_temp.txt"
+        }
+      },
+      "type": "n8n-nodes-base.convertToFile",
+      "typeVersion": 1.1,
+      "position": [
+        2624,
+        1472
+      ],
+      "id": "8caea8e7-37ce-4ad1-b09f-ee6aa711c0f5",
+      "name": "Convert to File"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT m.id, m.propiedad_id, m.de_a, m.monto, m.descripcion, p.direccion,\n       (SELECT valor::numeric FROM configuracion WHERE clave = 'iva') AS iva_pct,\n       (SELECT valor::numeric FROM configuracion WHERE clave = 'rotacion_habitaciones_inquilino') AS tarifa_inquilino\nFROM movimientos m\nJOIN propiedades p ON p.id = m.propiedad_id\nWHERE m.tipo = 'Rotacion_Habitacion_Inquilino'\n  AND m.propiedad_id = {{ $('Leer Liquidación').item.json.propiedad_id }}\n  AND m.estado_validacion = 'validado';",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1584,
+        1664
+      ],
+      "id": "77e7a569-87fe-44e1-9759-b14899040efe",
+      "name": "Leer Rotacion Inquilino",
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_ME",
+          "name": "postgres (replace)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all().map(i => i.json);\n\nconst result = items.map(r => {\n  const ivaPct = parseFloat(r.iva_pct);\n  const tarifaInquilino = parseFloat(r.tarifa_inquilino);\n  const montoOriginal = parseFloat(r.monto) || 0;\n  const subtotal = montoOriginal > 0 ? montoOriginal : tarifaInquilino;\n  const iva = Math.round(subtotal * ivaPct * 100) / 100;\n  const total = Math.round((subtotal + iva) * 100) / 100;\n\n  const texto = `\nCLIENTE: ${r.de_a}\nCONCEPTO: Gestión alquiler — ${r.direccion}\n${r.descripcion}\n\nSubtotal: ${subtotal.toFixed(2)}€\nIVA (21%): ${iva.toFixed(2)}€\nTOTAL: ${total.toFixed(2)}€\n`.trim();\n\n  return { json: { movimiento_id: r.id, cliente: r.de_a, subtotal, iva, total, texto_factura_inquilino: texto } };\n});\n\nreturn result;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1872,
+        1664
+      ],
+      "id": "6df45931-91c8-4ca9-b6bc-5e870f7a5b43",
+      "name": "Datos Factura Inquilino"
+    },
+    {
+      "parameters": {
+        "jsCode": "const l = $input.first().json;\nconst detalle = typeof l.detalle_calculo === 'string' ? JSON.parse(l.detalle_calculo) : l.detalle_calculo;\nconst ivaPct = 0.21;\n\nconst conceptosAparte = [];\n\n// Caso: cobro directo al propietario — los honorarios se facturan aparte\nif (detalle.nota_cobro_directo) {\n  const base = parseFloat(l.honorarios_gestion);\n  const iva = Math.round(base * ivaPct * 100) / 100;\n  conceptosAparte.push({\n    concepto: 'Honorarios de gestión (cobro directo al propietario)',\n    base: base,\n    iva: iva,\n    total: Math.round((base + iva) * 100) / 100\n  });\n}\n\n// Reparaciones que superan el umbral\nif (detalle.reparaciones_factura_aparte) {\n  for (const r of detalle.reparaciones_factura_aparte) {\n    const iva = Math.round(r.facturado * ivaPct * 100) / 100;\n    conceptosAparte.push({\n      concepto: `Reparación: ${r.concepto}`,\n      base: r.facturado,\n      iva: iva,\n      total: r.facturado_con_iva\n    });\n  }\n}\n\n// Rotación tradicional que supera el umbral\nif (detalle.rotaciones_tradicional_factura_aparte) {\n  for (const r of detalle.rotaciones_tradicional_factura_aparte) {\n    const iva = Math.round(r.base * ivaPct * 100) / 100;\n    conceptosAparte.push({\n      concepto: `Rotación tradicional: ${r.concepto}`,\n      base: r.base,\n      iva: iva,\n      total: r.con_iva\n    });\n  }\n}\n\nif (conceptosAparte.length === 0) {\n  return [{ json: { sin_facturas_aparte: true, texto_factura_aparte: null } }];\n}\n\nconst totalGeneral = conceptosAparte.reduce((s, c) => s + c.total, 0);\n\nconst tabla = conceptosAparte.map(c =>\n  `${c.concepto.padEnd(45)} ${c.base.toFixed(2).padStart(10)}€ ${c.iva.toFixed(2).padStart(10)}€ ${c.total.toFixed(2).padStart(10)}€`\n).join('\\n');\n\nconst texto = `\nFACTURA APARTE — ${l.direccion}\n(No se descuenta de la liquidación mensual)\n\n${'Concepto'.padEnd(45)} ${'Base'.padStart(11)} ${'IVA'.padStart(11)} ${'Total'.padStart(11)}\n${tabla}\n${'-'.repeat(80)}\n${'TOTAL A FACTURAR APARTE'.padEnd(45)} ${' '.repeat(11)} ${' '.repeat(11)} ${totalGeneral.toFixed(2).padStart(10)}€\n`.trim();\n\nreturn [{ json: { conceptos: conceptosAparte, total: Math.round(totalGeneral * 100) / 100, texto_factura_aparte: texto } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1952,
+        1040
+      ],
+      "id": "ba25cbf1-07d0-431b-a66c-3faaf6e0db12",
+      "name": "Datos Factura Aparte"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "700c85a2-ba1c-4417-93f6-a5dcc939cd58",
+              "name": "mes",
+              "value": "={{ $now.format('yyyy-MM-01') }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        288,
+        1040
+      ],
+      "id": "310ba44b-17d0-44f0-a8b4-669be9560ddd",
+      "name": "Fijar Parametros"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT id FROM liquidaciones WHERE mes = '{{ $json.mes }}';",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        496,
+        1040
+      ],
+      "id": "f165d371-c092-44e7-ae21-4728d052fde4",
+      "name": "Leer Liquidaciones del Mes",
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_ME",
+          "name": "postgres (replace)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        704,
+        1040
+      ],
+      "id": "7251dc06-24df-44e8-8b2b-6f3fa052c8b5",
+      "name": "Loop Over Items"
+    },
+    {
+      "parameters": {
+        "numberInputs": 5
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        3056,
+        1040
+      ],
+      "id": "1dfd3538-9bc4-4b5f-b529-59d5640f897a",
+      "name": "Merge"
+    },
+    {
+      "parameters": {
+        "jsCode": "const datos = $('Leer Liquidación').all();\nconst ultimo = datos[datos.length - 1].json;\n\nreturn [{\n  json: {\n    propiedad_id: ultimo.propiedad_id,\n    liquidacion_id: ultimo.id,\n    direccion: ultimo.direccion\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3232,
+        1088
+      ],
+      "id": "cb860e84-fe97-47b8-a8cd-720433a5397a",
+      "name": "Preparar Log"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "rWsQVLC3hGipY6oO",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/rWsQVLC3hGipY6oO",
+          "cachedResultName": "Logs - Subworkflow"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "duracion_ms": 0,
+            "errores_detectados": 0,
+            "workflow_origen": "Workflow 6 - Exportaciones",
+            "tipo_evento": "info",
+            "disparado_por": "manual",
+            "inicio": "={{ $now.toISO() }}",
+            "fin": "={{ $now.toISO() }}",
+            "propiedades_procesadas": 1,
+            "liquidaciones_generadas": 1,
+            "payload": "={{ JSON.stringify({propiedad_id: $json.propiedad_id, liquidacion_id: $json.liquidacion_id, direccion: $json.direccion}) }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "workflow_origen",
+              "displayName": "workflow_origen",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "tipo_evento",
+              "displayName": "tipo_evento",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "disparado_por",
+              "displayName": "disparado_por",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "inicio",
+              "displayName": "inicio",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "fin",
+              "displayName": "fin",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "duracion_ms",
+              "displayName": "duracion_ms",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "number"
+            },
+            {
+              "id": "propiedades_procesadas",
+              "displayName": "propiedades_procesadas",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "number"
+            },
+            {
+              "id": "liquidaciones_generadas",
+              "displayName": "liquidaciones_generadas",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "number"
+            },
+            {
+              "id": "errores_detectados",
+              "displayName": "errores_detectados",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "number"
+            },
+            {
+              "id": "payload",
+              "displayName": "payload",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        3424,
+        1088
+      ],
+      "id": "165a27ab-e03b-4672-a98e-501b3559fd58",
+      "name": "Execute Workflow (Logs)"
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $('Leer Liquidación').item.json.propietario_email }}",
+        "subject": "={{ 'Liquidación mensual - ' + $('Leer Liquidación').item.json.direccion }}",
+        "message": "Buenos días,    Adjunto la liquidación correspondiente al mes indicado.    Un saludo,   Property Management Co.",
+        "options": {
+          "appendAttribution": false,
+          "attachmentsUi": {
+            "attachmentsBinary": [
+              {
+                "property": "pdf"
+              }
+            ]
+          }
+        }
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        2816,
+        688
+      ],
+      "id": "bfcc2480-8bfe-441e-880c-9e5ab68b070f",
+      "name": "Enviar Email Propietario",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "REPLACE_ME",
+          "name": "gmailOAuth2 (replace)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "ef30b7a2-7e74-4baa-931c-377ae378f6d8",
+              "leftValue": "={{ $('Leer Liquidación').item.json.propietario_email }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            },
+            {
+              "id": "df84c719-9ceb-434a-94c0-48a838bf28ab",
+              "leftValue": "={{ $('Leer Liquidación').item.json.estado }}",
+              "rightValue": "validado",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        2528,
+        768
+      ],
+      "id": "9f726c0e-7746-4146-81e2-a00b9105ed07",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "resource": "fileFolder",
+        "queryString": "={{ (() => { const f = new Date($('Leer Liquidación').item.json.mes); const fc = new Date(f.getTime() + 24*60*60*1000); const mm = String(fc.getUTCMonth()+1).padStart(2,'0'); return 'liquidacion_' + fc.getUTCFullYear() + '-' + mm + '_propiedad_' + $('Leer Liquidación').item.json.propiedad_id + '.pdf'; })() }}",
+        "limit": 1,
+        "filter": {
+          "folderId": {
+            "__rl": true,
+            "value": "REPLACE_WITH_YOUR_FOLDERID",
+            "mode": "list",
+            "cachedResultName": "(replace)",
+            "cachedResultUrl": "(replace)"
+          }
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        1136,
+        896
+      ],
+      "id": "b532cdd2-691d-4662-ae5e-940285769039",
+      "name": "Buscar PDF Existente",
+      "alwaysOutputData": true,
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "REPLACE_ME",
+          "name": "googleDriveOAuth2Api (replace)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "4dbb1389-62c3-4ceb-a3d0-f303e9fdb9e0",
+              "leftValue": "={{ $json.id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1360,
+        896
+      ],
+      "id": "d1bedc0e-bae5-48f7-9d01-471664bb8a24",
+      "name": "PDF Ya Existe"
+    },
+    {
+      "parameters": {
+        "operation": "deleteFile",
+        "fileId": {
+          "__rl": true,
+          "value": "REPLACE_WITH_YOUR_FILEID",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        1536,
+        720
+      ],
+      "id": "4af7fd02-5ad6-40a8-9495-58c85e70c6e0",
+      "name": "Borrar PDF Anterior",
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "REPLACE_ME",
+          "name": "googleDriveOAuth2Api (replace)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "inputDataFieldName": "pdf",
+        "name": "={{ (() => { const f = new Date($('Leer Liquidación').item.json.mes); const fc = new Date(f.getTime() + 24*60*60*1000); const mm = String(fc.getUTCMonth()+1).padStart(2,'0'); return 'liquidacion_' + fc.getUTCFullYear() + '-' + mm + '_propiedad_' + $('Leer Liquidación').item.json.propiedad_id + '.pdf'; })() }}",
+        "driveId": {
+          "__rl": true,
+          "value": "REPLACE_WITH_YOUR_DRIVEID",
+          "mode": "list",
+          "cachedResultName": "(replace)",
+          "cachedResultUrl": "(replace)"
+        },
+        "folderId": {
+          "__rl": true,
+          "value": "REPLACE_WITH_YOUR_FOLDERID",
+          "mode": "list",
+          "cachedResultName": "(replace)",
+          "cachedResultUrl": "(replace)"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        2640,
+        912
+      ],
+      "id": "2f402d2d-ed10-4060-8af0-9baa384370c2",
+      "name": "Subir PDF",
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "REPLACE_ME",
+          "name": "googleDriveOAuth2Api (replace)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "name": "={{ (() => { const f = new Date($('Leer Liquidación').item.json.mes); const fc = new Date(f.getTime() + 24*60*60*1000); const mm = String(fc.getUTCMonth()+1).padStart(2,'0'); return 'speedinvoice_' + fc.getUTCFullYear() + '-' + mm + '_propiedad_' + $('Leer Liquidación').item.json.propiedad_id + '.txt'; })() }}",
+        "driveId": {
+          "__rl": true,
+          "value": "REPLACE_WITH_YOUR_DRIVEID",
+          "mode": "list",
+          "cachedResultName": "(replace)",
+          "cachedResultUrl": "(replace)"
+        },
+        "folderId": {
+          "__rl": true,
+          "value": "REPLACE_WITH_YOUR_FOLDERID",
+          "mode": "list",
+          "cachedResultName": "(replace)",
+          "cachedResultUrl": "(replace)"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        2816,
+        1472
+      ],
+      "id": "693e4c58-680e-476c-a659-c3f1c0f358a8",
+      "name": "Subir SpeedInvoice",
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "REPLACE_ME",
+          "name": "googleDriveOAuth2Api (replace)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "fileFolder",
+        "queryString": "={{ (() => { const f = new Date($('Leer Liquidación').item.json.mes); const fc = new Date(f.getTime() + 24*60*60*1000); const mm = String(fc.getUTCMonth()+1).padStart(2,'0'); return 'speedinvoice_' + fc.getUTCFullYear() + '-' + mm + '_propiedad_' + $('Leer Liquidación').item.json.propiedad_id + '.txt'; })() }}",
+        "limit": 1,
+        "filter": {
+          "folderId": {
+            "__rl": true,
+            "value": "REPLACE_WITH_YOUR_FOLDERID",
+            "mode": "list",
+            "cachedResultName": "(replace)",
+            "cachedResultUrl": "(replace)"
+          }
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        1856,
+        1456
+      ],
+      "id": "a1ca5fef-6a61-42a7-ac8c-52fd59278515",
+      "name": "Buscar TXT Existente",
+      "alwaysOutputData": true,
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "REPLACE_ME",
+          "name": "googleDriveOAuth2Api (replace)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "4dbb1389-62c3-4ceb-a3d0-f303e9fdb9e0",
+              "leftValue": "={{ $json.id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        2064,
+        1456
+      ],
+      "id": "17ca2601-78d7-4eee-a379-7b8e61e2235c",
+      "name": "TXT Ya Existe"
+    },
+    {
+      "parameters": {
+        "operation": "deleteFile",
+        "fileId": {
+          "__rl": true,
+          "value": "REPLACE_WITH_YOUR_FILEID",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        2240,
+        1328
+      ],
+      "id": "48c61820-0d30-4a08-98d8-bbbd6a59d30d",
+      "name": "Borrar TXT Anterior",
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "REPLACE_ME",
+          "name": "googleDriveOAuth2Api (replace)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{\n  json: {\n    texto_para_copiar: $('Datos SpeedInvoice').item.json.texto_para_copiar\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2416,
+        1472
+      ],
+      "id": "f1fc2037-c4d0-4270-8ace-d18fdc3f0b6f",
+      "name": "Recuperar Texto SpeedInvoice"
+    },
+    {
+      "parameters": {
+        "content": "## Workflow 6 · Exportaciones\n**Fase:** 4 · Salida\n\n**Qué hace**\nGenera los documentos de cada liquidación del mes y los envía.\n\n**Cómo funciona**\n1. Lee las liquidaciones del mes en curso.\n2. Loop Over Items: por cada liquidación:\n   - `Generar HTML`: maqueta la liquidación con el formato de la pestaña LIQUIDACION.\n   - Gotenberg convierte el HTML en PDF.\n   - `Datos SpeedInvoice`: prepara el TXT con los conceptos para copiar a SpeedInvoice.\n   - Sube PDF y TXT a Google Drive (carpeta Liquidaciones).\n   - Si `estado = 'validado'` y el propietario tiene email, envía el PDF por correo (nodo \"Enviar Email Propietario\").\n   - Registra el log (Logs - Subworkflow) y vuelve al bucle.\n3. Cuando termina el bucle (salida \"done\"), llama UNA sola vez al Workflow 7.\n\n**Ojo:** la llamada a W7 sale de la salida \"done\", no de dentro del bucle.",
+        "height": 672,
+        "width": 1088,
+        "color": 5
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        0,
+        0
+      ],
+      "typeVersion": 1,
+      "id": "c48b1ca7-d3a5-455b-a5e6-0aef171abaa1",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        64,
+        1040
+      ],
+      "id": "7a35db58-7a70-4520-815b-14de52046811",
+      "name": "When Executed by Another Workflow"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "VXfYW6cJkyTkZyJ1",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/VXfYW6cJkyTkZyJ1",
+          "cachedResultName": "Workflow 7 - Rentabilidad"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        928,
+        768
+      ],
+      "id": "d3665420-9bc7-4654-bba7-56c6b05d3677",
+      "name": "Call 'Workflow 7 - Rentabilidad'"
+    }
+  ],
+  "connections": {
+    "Generar HTML": {
+      "main": [
+        [
+          {
+            "node": "Move Binary Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Move Binary Data": {
+      "main": [
+        [
+          {
+            "node": "Convertir a PDF",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Convertir a PDF": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Subir PDF",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Leer Liquidación": {
+      "main": [
+        [
+          {
+            "node": "Datos SpeedInvoice",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Datos Factura Aparte",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Leer Rotacion Inquilino",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Buscar PDF Existente",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Datos SpeedInvoice": {
+      "main": [
+        [
+          {
+            "node": "Guardar Datos SpeedInvoice",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Buscar TXT Existente",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Guardar Datos SpeedInvoice": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "Convert to File": {
+      "main": [
+        [
+          {
+            "node": "Subir SpeedInvoice",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Leer Rotacion Inquilino": {
+      "main": [
+        [
+          {
+            "node": "Datos Factura Inquilino",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fijar Parametros": {
+      "main": [
+        [
+          {
+            "node": "Leer Liquidaciones del Mes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Leer Liquidaciones del Mes": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Items": {
+      "main": [
+        [
+          {
+            "node": "Call 'Workflow 7 - Rentabilidad'",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Leer Liquidación",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Datos Factura Aparte": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "Preparar Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Datos Factura Inquilino": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 4
+          }
+        ]
+      ]
+    },
+    "Preparar Log": {
+      "main": [
+        [
+          {
+            "node": "Execute Workflow (Logs)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute Workflow (Logs)": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "Enviar Email Propietario",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar PDF Existente": {
+      "main": [
+        [
+          {
+            "node": "PDF Ya Existe",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PDF Ya Existe": {
+      "main": [
+        [
+          {
+            "node": "Borrar PDF Anterior",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Generar HTML",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Borrar PDF Anterior": {
+      "main": [
+        [
+          {
+            "node": "Generar HTML",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Subir PDF": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Subir SpeedInvoice": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 3
+          }
+        ]
+      ]
+    },
+    "Buscar TXT Existente": {
+      "main": [
+        [
+          {
+            "node": "TXT Ya Existe",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "TXT Ya Existe": {
+      "main": [
+        [
+          {
+            "node": "Borrar TXT Anterior",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Recuperar Texto SpeedInvoice",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Borrar TXT Anterior": {
+      "main": [
+        [
+          {
+            "node": "Recuperar Texto SpeedInvoice",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Recuperar Texto SpeedInvoice": {
+      "main": [
+        [
+          {
+            "node": "Convert to File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "Fijar Parametros",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "timeSavedMode": "fixed",
+    "timezone": "Europe/Madrid",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false,
+    "errorWorkflow": "nzlatDFUYGWhzgoh"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "id": "Rec0HbeBvkgLbGx0",
+  "tags": [
+    {
+      "name": "4-salida"
+    },
+    {
+      "name": "subworkflow"
+    },
+    {
+      "name": "liquidaciones"
+    }
+  ]
+}

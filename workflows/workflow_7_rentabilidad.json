@@ -1,0 +1,317 @@
+{
+  "name": "Workflow 7 - Rentabilidad",
+  "nodes": [
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT\n  p.codigo_rentila,\n  p.direccion,\n  pr.nombre AS propietario,\n  COUNT(DISTINCT l.mes) AS meses_liquidados,\n  SUM(l.ingresos) AS ingresos_totales,\n  SUM(l.gastos) AS gastos_totales,\n  SUM(l.honorarios_gestion + l.iva) AS honorarios_totales,\n  SUM(l.neto_propietario) AS neto_acumulado,\n  COALESCE((\n    SELECT SUM(m.monto) FROM movimientos m\n    WHERE m.propiedad_id = p.id\n      AND m.tipo = 'Alquiler'\n      AND m.estado_validacion IN ('descuadrado', 'pendiente_validar', 'pago_parcial')\n  ), 0) AS impagos_detectados\nFROM propiedades p\nJOIN liquidaciones l ON l.propiedad_id = p.id\nLEFT JOIN propietarios pr ON pr.id = p.propietario_id\nGROUP BY p.id, p.codigo_rentila, p.direccion, pr.nombre\nORDER BY neto_acumulado DESC;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        672,
+        672
+      ],
+      "id": "060ad4bd-0359-43e0-87ab-3c8bfa375274",
+      "name": "Leer Rentabilidad",
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_ME",
+          "name": "postgres (replace)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "REPLACE_WITH_YOUR_DOCUMENTID",
+          "mode": "list",
+          "cachedResultName": "(replace)",
+          "cachedResultUrl": "(replace)"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Hoja 1",
+          "cachedResultUrl": "https://example.com/path"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Código": "={{ $json.codigo_rentila }}",
+            "Dirección": "={{ $json.direccion }}",
+            "Propietario": "={{ $json.propietario }}",
+            "Meses": "={{ $json.meses_liquidados }}",
+            "Ingresos": "={{ $json.ingresos_totales }}",
+            "Gastos": "={{ $json.gastos_totales }}",
+            "Honorarios+IVA": "={{ $json.honorarios_totales }}",
+            "Neto Acumulado": "={{ $json.neto_acumulado }}",
+            "Impagos Detectados": "={{ $json.impagos_detectados }}"
+          },
+          "matchingColumns": [
+            "Código"
+          ],
+          "schema": [
+            {
+              "id": "Código",
+              "displayName": "Código",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Dirección",
+              "displayName": "Dirección",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Propietario",
+              "displayName": "Propietario",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Meses",
+              "displayName": "Meses",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Ingresos",
+              "displayName": "Ingresos",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Gastos",
+              "displayName": "Gastos",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Honorarios+IVA",
+              "displayName": "Honorarios+IVA",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Neto Acumulado",
+              "displayName": "Neto Acumulado",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Impagos Detectados",
+              "displayName": "Impagos Detectados",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        880,
+        672
+      ],
+      "id": "8ca40e7f-a4b5-4878-a1ce-76909eb4517b",
+      "name": "Actualizar Panel Rentabilidad",
+      "retryOnFail": true,
+      "waitBetweenTries": 5000,
+      "maxTries": 5,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REPLACE_ME",
+          "name": "googleSheetsOAuth2Api (replace)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "clear",
+        "documentId": {
+          "__rl": true,
+          "value": "REPLACE_WITH_YOUR_DOCUMENTID",
+          "mode": "list",
+          "cachedResultName": "(replace)",
+          "cachedResultUrl": "(replace)"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Hoja 1",
+          "cachedResultUrl": "https://example.com/path"
+        },
+        "clear": "specificRows",
+        "startIndex": 2,
+        "rowsToDelete": 10000
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        464,
+        672
+      ],
+      "id": "26a6f9aa-6acc-4bff-8429-b4957ca8a26b",
+      "name": "Limpiar Panel Rentabilidad",
+      "retryOnFail": true,
+      "waitBetweenTries": 5000,
+      "maxTries": 5,
+      "executeOnce": false,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REPLACE_ME",
+          "name": "googleSheetsOAuth2Api (replace)"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.limit",
+      "typeVersion": 1,
+      "position": [
+        256,
+        672
+      ],
+      "id": "52293113-0492-435b-86bb-38206d0f3e0e",
+      "name": "Limit"
+    },
+    {
+      "parameters": {
+        "content": "## Workflow 7 · Rentabilidad\n**Fase:** 4 · Salida\n\n**Qué hace**\nActualiza la hoja \"Panel de Rentabilidad\" en Google Sheets, una fila por propiedad.\n\n**Cómo funciona** (se ejecuta una vez por ciclo)\n1. `Limit` (1 item): evita que cada item de entrada repita la escritura. Es lo que impide el error 429 de cuota de Google Sheets.\n2. `Limpiar Panel Rentabilidad`: vacía la hoja (1 petición).\n3. `Leer Rentabilidad`: consulta en PostgreSQL, por propiedad, ingresos, gastos, honorarios + IVA, neto acumulado e impagos.\n4. `Actualizar Panel Rentabilidad`: operación Append, escribe todas las filas en una sola petición.\n\n**Ojo:** el orden de los nodos importa: Limit → Limpiar → Leer → Actualizar. Si Limpiar va después de Leer, el Append recibe 1 item.\n**Ojo:** reintentos 5 intentos / 5 s en los dos nodos de Sheets.\n**Límite de Google:** 60 escrituras por minuto y usuario.",
+        "height": 560,
+        "width": 1184,
+        "color": 5
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        0,
+        0
+      ],
+      "typeVersion": 1,
+      "id": "a234f129-b68d-4aaf-9d72-17d4bdbdd7d5",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        32,
+        672
+      ],
+      "id": "c74d6172-a5b2-4b6d-8470-4ae533ebf17d",
+      "name": "When Executed by Another Workflow"
+    }
+  ],
+  "connections": {
+    "Leer Rentabilidad": {
+      "main": [
+        [
+          {
+            "node": "Actualizar Panel Rentabilidad",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Limpiar Panel Rentabilidad": {
+      "main": [
+        [
+          {
+            "node": "Leer Rentabilidad",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Limit": {
+      "main": [
+        [
+          {
+            "node": "Limpiar Panel Rentabilidad",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "Limit",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "timeSavedMode": "fixed",
+    "timezone": "Europe/Madrid",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false,
+    "errorWorkflow": "nzlatDFUYGWhzgoh"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "id": "VXfYW6cJkyTkZyJ1",
+  "tags": [
+    {
+      "name": "4-salida"
+    },
+    {
+      "name": "subworkflow"
+    },
+    {
+      "name": "liquidaciones"
+    }
+  ]
+}

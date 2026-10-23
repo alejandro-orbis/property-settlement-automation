@@ -1,0 +1,417 @@
+{
+  "name": "Workflow 1C - Importación Registro",
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyHour"
+            }
+          ]
+        },
+        "triggerOn": "specificFolder",
+        "folderToWatch": {
+          "__rl": true,
+          "value": "REPLACE_WITH_YOUR_ID",
+          "mode": "list",
+          "cachedResultName": "Registro Mensual - client",
+          "cachedResultUrl": "https://example.com/path"
+        },
+        "event": "fileCreated",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleDriveTrigger",
+      "typeVersion": 1,
+      "position": [
+        48,
+        944
+      ],
+      "id": "08aae076-2b2d-4d5e-a735-8f6707fd1a98",
+      "name": "Google Drive Trigger",
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "REPLACE_ME",
+          "name": "googleDriveOAuth2Api (replace)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "xlsx",
+        "options": {
+          "headerRow": false,
+          "range": "A5:O6001",
+          "sheetName": "REGISTRO"
+        }
+      },
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1.1,
+      "position": [
+        464,
+        944
+      ],
+      "id": "bad02f7c-84f9-4b84-8b68-27574ebd6027",
+      "name": "Extract from File"
+    },
+    {
+      "parameters": {
+        "operation": "download",
+        "fileId": {
+          "__rl": true,
+          "value": "REPLACE_WITH_YOUR_FILEID",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        256,
+        944
+      ],
+      "id": "2d1df250-c8c8-4356-99d1-78750ed81052",
+      "name": "Download",
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "REPLACE_ME",
+          "name": "googleDriveOAuth2Api (replace)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const MAPA_MOVIMIENTO = {\n  'Alquiler cobrado': 'Alquiler',\n  'Suministros cobrados': 'Suministros',\n  'Fianza recibida': 'Fianza / Depósito',\n  'Fianza devuelta': 'Fianza / Depósito',\n  'Rotación tradicional propietario': 'Rotacion_Tradicional',\n  'Rotación habitación propietario': 'Rotacion_Propietario',\n  'Rotación habitación inquilino': 'Rotacion_Habitacion_Inquilino',\n  'Reparación y conservación': 'Gasto_Reparacion',\n};\n\nconst IGNORAR = ['Honorarios de gestión', 'Transferencia a propietario', 'Coste colaborador interno'];\n\nconst MAPA_ESTADO = {\n  'Cobrado': 'validado',\n  'Compensado': 'validado',\n  'Pagado': 'validado',\n  'Pendiente': 'pendiente_validar',\n  'Cobrado parcialmente': 'pago_parcial',\n};\n\nfunction serieExcelAFecha(serie) {\n  if (typeof serie !== 'number') return null;\n  const utc_days = Math.floor(serie - 25569);\n  const utc_value = utc_days * 86400;\n  return new Date(utc_value * 1000).toISOString().split('T')[0];\n}\n\nconst items = $input.all();\nconst result = [];\n\nfor (const item of items) {\n  const r = item.json.row;\n  if (!r) continue;\n\n  // Índices según cabecera real: 0=Fecha,1=Piso,2=Movimiento,3=Concepto,4=Base,5=Margen,6=ImporteBanco,7=Estado,8=Factura,9=Observaciones\n  const fecha = r[0];\n  const piso = r[1];\n  const movimiento = r[2];\n  const concepto = r[3];\n  const base = r[4];\n  const importeBanco = r[6];\n  const estadoOriginal = r[7];\n\n  if (!movimiento || !fecha || IGNORAR.includes(movimiento) || estadoOriginal === 'Anulado') {\n    continue;\n  }\n\n  const pisoTexto = String(piso || '');\n  const codigoMatch = pisoTexto.match(/^([A-Z0-9_-]+)\\s*[–-]/);\n  const codigoRentila = codigoMatch ? codigoMatch[1].trim() : null;\n  if (!codigoRentila) continue;\n\n  const tipo = MAPA_MOVIMIENTO[movimiento] || 'Otro_Requiere_Revision';\n  const estado = MAPA_ESTADO[estadoOriginal] || 'pendiente_validar';\n  const monto = base || importeBanco || 0;\n  const fechaFormateada = serieExcelAFecha(fecha) || fecha;\n\n  result.push({\n    json: {\n      codigo_rentila: codigoRentila,\n      fecha: fechaFormateada,\n      de_a: String(concepto || ''),\n      monto: parseFloat(monto) || 0,\n      tipo: tipo,\n      descripcion: String(concepto || ''),\n      estado_validacion: estado,\n      referencia_original: `${fechaFormateada}_${codigoRentila}_${movimiento}_${monto}`\n    }\n  });\n}\n\nreturn result;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        672,
+        944
+      ],
+      "id": "89ca462d-d476-4c0f-b20d-59c44deecd5e",
+      "name": "Parsear Registro"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO movimientos (propiedad_id, fecha, de_a, monto, tipo, descripcion, estado, estado_validacion, referencia_original)\nVALUES (\n  (SELECT id FROM propiedades WHERE codigo_rentila = '{{ $json.codigo_rentila }}'),\n  '{{ $json.fecha }}',\n  '{{ $json.de_a.replace(/'/g, \"''\") }}',\n  {{ $json.monto }},\n  '{{ $json.tipo }}',\n  '{{ $json.descripcion.replace(/'/g, \"''\") }}',\n  'Pagado',\n  '{{ $json.estado_validacion }}',\n  '{{ $json.referencia_original.replace(/'/g, \"''\") }}'\n)\nON CONFLICT (referencia_original) DO NOTHING;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        880,
+        944
+      ],
+      "id": "87f5035e-2617-44d9-ae78-88eb6d50a06a",
+      "name": "Insert Movimiento Registro",
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_ME",
+          "name": "postgres (replace)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "NA2amEDgkes8DXaq",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/NA2amEDgkes8DXaq",
+          "cachedResultName": "Workflow 2 - Normalizacion"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        1504,
+        944
+      ],
+      "id": "d6776ca5-ad79-4d04-9f0c-8aad63cf3b72",
+      "name": "Call 'Workflow 2 - Normalizacion'"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $('Parsear Registro').all();\n\nreturn [{\n  json: {\n    movimientos_procesados: items.length,\n    total_importado: Math.round(items.reduce((sum, i) => sum + parseFloat(i.json.monto || 0), 0) * 100) / 100\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1088,
+        944
+      ],
+      "id": "bfeb88e4-270c-4844-9776-09a0484cad3d",
+      "name": "Preparar Log"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "rWsQVLC3hGipY6oO",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/rWsQVLC3hGipY6oO",
+          "cachedResultName": "Logs - Subworkflow"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "duracion_ms": 0,
+            "propiedades_procesadas": 0,
+            "liquidaciones_generadas": 0,
+            "errores_detectados": 0,
+            "workflow_origen": "Workflow 1C - Importacion Registro",
+            "tipo_evento": "info",
+            "disparado_por": "automatico",
+            "inicio": "={{ $now.toISO() }}",
+            "fin": "={{ $now.toISO() }}",
+            "payload": "={{ JSON.stringify($json) }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "workflow_origen",
+              "displayName": "workflow_origen",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "tipo_evento",
+              "displayName": "tipo_evento",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "disparado_por",
+              "displayName": "disparado_por",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "inicio",
+              "displayName": "inicio",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "fin",
+              "displayName": "fin",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "duracion_ms",
+              "displayName": "duracion_ms",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "number",
+              "removed": false
+            },
+            {
+              "id": "propiedades_procesadas",
+              "displayName": "propiedades_procesadas",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "number",
+              "removed": false
+            },
+            {
+              "id": "liquidaciones_generadas",
+              "displayName": "liquidaciones_generadas",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "number",
+              "removed": false
+            },
+            {
+              "id": "errores_detectados",
+              "displayName": "errores_detectados",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "number",
+              "removed": false
+            },
+            {
+              "id": "payload",
+              "displayName": "payload",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        1296,
+        944
+      ],
+      "id": "7804378d-a572-4d70-a98c-8c5ec1afc60d",
+      "name": "Execute Workflow (Logs)"
+    },
+    {
+      "parameters": {
+        "content": "## Workflow 1C · Importación Registro (Excel Control Sheet)\n**Fase:** 1 · Entrada de datos\n\n**Qué hace**\nImporta el REGISTRO del Excel \"Control Sheet\" de la empresa como fuente de movimientos.\n\n**Cómo funciona**\n1. Drive Trigger: revisa cada hora la carpeta \"Registro Mensual\". Evento `fileCreated`: solo reacciona a archivos NUEVOS, no a ediciones de uno existente.\n2. Download + Extract from File: hoja `REGISTRO`, rango `A5:O6001`, sin cabecera (cada fila llega como array). La cabecera está en la fila 4; las columnas P en adelante son fórmulas y no se leen.\n3. `Parsear Registro`:\n   - Ignora \"Honorarios de gestión\", \"Transferencia a propietario\", \"Coste colaborador interno\" y filas Anuladas.\n   - Traduce \"Movimiento\" a `tipo` (Alquiler, Suministros, Fianza / Depósito, Rotacion_Tradicional, Rotacion_Propietario, Rotacion_Habitacion_Inquilino, Gasto_Reparacion; el resto, `Otro_Requiere_Revision`).\n   - Traduce \"Estado\": Cobrado, Compensado y Pagado = `validado`; Pendiente = `pendiente_validar`; Cobrado parcialmente = `pago_parcial`.\n   - Saca el código de piso (ej. DEMO_001) del texto de la columna Piso. Importe = Base o, si no hay, Importe banco.\n4. `Insert Movimiento Registro`: inserta en `movimientos`. Antiduplicados: `referencia_original` (fecha_código_movimiento_importe) con `ON CONFLICT DO NOTHING`.\n5. Registra el log y llama al Workflow 2.\n\n**Siguiente:** Workflow 2 (Normalización)\n**Ojo:** hay que subir un archivo nuevo cada mes (o cambiar el trigger a `fileUpdated` si la empresa edita siempre el mismo).\n**Ojo:** si la empresa añade columnas o filas fuera de `A5:O6001`, hay que ampliar el rango.\n**Ojo:** la clave antiduplicado no incluye el concepto. Dos movimientos del mismo tipo, importe, piso y fecha se interpretan como uno solo.\n**IDs de Google a revisar en el traspaso:** carpeta del trigger.",
+        "height": 768,
+        "width": 1664
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        0,
+        0
+      ],
+      "typeVersion": 1,
+      "id": "72a4cad2-7e34-465d-9b1f-00a798e9cc93",
+      "name": "Sticky Note"
+    }
+  ],
+  "connections": {
+    "Google Drive Trigger": {
+      "main": [
+        [
+          {
+            "node": "Download",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download": {
+      "main": [
+        [
+          {
+            "node": "Extract from File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract from File": {
+      "main": [
+        [
+          {
+            "node": "Parsear Registro",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parsear Registro": {
+      "main": [
+        [
+          {
+            "node": "Insert Movimiento Registro",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert Movimiento Registro": {
+      "main": [
+        [
+          {
+            "node": "Preparar Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar Log": {
+      "main": [
+        [
+          {
+            "node": "Execute Workflow (Logs)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute Workflow (Logs)": {
+      "main": [
+        [
+          {
+            "node": "Call 'Workflow 2 - Normalizacion'",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "timeSavedMode": "fixed",
+    "timezone": "Europe/Madrid",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false,
+    "errorWorkflow": "nzlatDFUYGWhzgoh"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "id": "fbkRzriIYd99aimj",
+  "tags": [
+    {
+      "name": "1-entrada"
+    },
+    {
+      "name": "liquidaciones"
+    },
+    {
+      "name": "automático"
+    }
+  ]
+}

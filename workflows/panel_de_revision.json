@@ -1,0 +1,261 @@
+{
+  "name": "Panel de Revisión",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        608,
+        384
+      ],
+      "id": "81f8c198-bd2b-4bc4-9043-27de3d873c35",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT\n  m.id,\n  m.fecha,\n  COALESCE(p.direccion, 'SIN IDENTIFICAR') AS propiedad,\n  m.descripcion,\n  m.monto,\n  CASE\n    WHEN m.estado_validacion = 'descuadrado' THEN 'Descuadre bancario'\n    WHEN m.estado_validacion = 'pago_parcial' THEN 'Pago parcial'\n    WHEN m.estado_validacion = 'pendiente_validar' THEN 'Sin confirmar en banco'\n    WHEN m.tipo = 'Gasto_SinClasificar_Revisar' THEN 'Gasto sin clasificar'\n    WHEN m.requiere_revision_propiedad = true THEN 'Propiedad sin identificar'\n  END AS motivo,\n  m.tipo\nFROM movimientos m\nLEFT JOIN propiedades p ON p.id = m.propiedad_id\nWHERE m.estado_validacion IN ('descuadrado', 'pago_parcial', 'pendiente_validar')\n   OR m.tipo = 'Gasto_SinClasificar_Revisar'\n   OR m.requiere_revision_propiedad = true\nORDER BY m.fecha DESC;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        816,
+        384
+      ],
+      "id": "15c250fb-7233-49e0-8a2f-1ef60bc85775",
+      "name": "Leer Casos Pendientes",
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_ME",
+          "name": "postgres (replace)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "clear",
+        "documentId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "REPLACE_WITH_YOUR_DOCUMENTID"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Hoja 1",
+          "cachedResultUrl": "https://example.com/path"
+        },
+        "clear": "specificRows",
+        "startIndex": 2,
+        "rowsToDelete": 1000
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1024,
+        384
+      ],
+      "id": "90663b06-3cea-41f9-af65-52f70c65beb5",
+      "name": "Clear",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REPLACE_ME",
+          "name": "googleSheetsOAuth2Api (replace)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "REPLACE_WITH_YOUR_DOCUMENTID"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Hoja 1",
+          "cachedResultUrl": "https://example.com/path"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "ID": "={{ $json.id }}",
+            "Fecha": "={{ $json.fecha }}",
+            "Propiedad": "={{ $json.propiedad }}",
+            "Descripción": "={{ $json.descripcion }}",
+            "Importe": "={{ $json.monto }}",
+            "Motivo": "={{ $json.motivo }}",
+            "Detalle": "={{ $json.tipo }}"
+          },
+          "matchingColumns": [
+            "ID"
+          ],
+          "schema": [
+            {
+              "id": "ID",
+              "displayName": "ID",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Fecha",
+              "displayName": "Fecha",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Propiedad",
+              "displayName": "Propiedad",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Descripción",
+              "displayName": "Descripción",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Importe",
+              "displayName": "Importe",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Motivo",
+              "displayName": "Motivo",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Detalle",
+              "displayName": "Detalle",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1232,
+        384
+      ],
+      "id": "274bab67-19ed-4225-895e-5bc18bd3b0a9",
+      "name": "Actualizar Panel de Revision",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REPLACE_ME",
+          "name": "googleSheetsOAuth2Api (replace)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Panel de Revisión\n**Fase:** 4 · Salida · MANUAL\n\n**Qué hace**\nHoja de Google Sheets con los movimientos que necesitan revisión humana: gastos sin propiedad asignada, descuadrados y pagos parciales.\n\n**Cómo funciona**\nLimpia la hoja y la rellena con los movimientos pendientes. Los cambios se corrigen en la base de datos o en el Excel de origen, y se vuelve a ejecutar el ciclo.\n\n**Cómo se usa:** ejecutar a mano antes del ciclo del día 10.",
+        "height": 448,
+        "width": 1344,
+        "color": 5
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        560,
+        -160
+      ],
+      "typeVersion": 1,
+      "id": "68383ca3-311e-44af-9834-d36cce05663b",
+      "name": "Sticky Note"
+    }
+  ],
+  "connections": {
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "Leer Casos Pendientes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Leer Casos Pendientes": {
+      "main": [
+        [
+          {
+            "node": "Clear",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Clear": {
+      "main": [
+        [
+          {
+            "node": "Actualizar Panel de Revision",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "timeSavedMode": "fixed",
+    "timezone": "Europe/Madrid",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "id": "FB5pba8KZXGgIoeB",
+  "tags": [
+    {
+      "name": "manual"
+    },
+    {
+      "name": "4-salida"
+    },
+    {
+      "name": "liquidaciones"
+    }
+  ]
+}

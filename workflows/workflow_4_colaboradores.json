@@ -1,0 +1,474 @@
+{
+  "name": "Workflow 4 - Colaboradores",
+  "nodes": [
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT clave, valor FROM configuracion;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        304,
+        464
+      ],
+      "id": "b4cf404b-a414-4591-9cfc-32d6ce2de91d",
+      "name": "Leer Config Colaboradores",
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_ME",
+          "name": "postgres (replace)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT cs.id, cs.colaborador_id, cs.propiedad_id, cs.tipo_servicio, cs.fecha, cs.horas, cs.num_visitas, cs.formalizado, p.tipo_gestion_default\nFROM colaborador_servicios cs\nLEFT JOIN propiedades p ON p.id = cs.propiedad_id\nWHERE cs.importe_calculado IS NULL;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        320,
+        688
+      ],
+      "id": "94482172-dafd-4e5b-bb0d-ed20539b504c",
+      "name": "Leer Servicios Colaborador",
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_ME",
+          "name": "postgres (replace)"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        512,
+        560
+      ],
+      "id": "ff4d4387-1aa7-48a6-a096-66b28fcdca1f",
+      "name": "Merge"
+    },
+    {
+      "parameters": {
+        "jsCode": "const configRows = $('Leer Config Colaboradores').all().map(i => i.json);\nconst config = {};\nfor (const row of configRows) {\n  config[row.clave] = row.valor;\n}\n\nconst servicios = $('Leer Servicios Colaborador').all().map(i => i.json);\n\nif (servicios.length === 0) {\n  return [{ json: { sin_servicios_que_calcular: true } }];\n}\n\nconst result = [];\nfor (const s of servicios) {\n  let importe = 0;\n  let detalle = '';\n  if (s.tipo_servicio === 'captacion') {\n    const visitasIncluidas = config['colaborador_captacion_visitas_incluidas'];\n    const tarifaBase = s.tipo_gestion_default === 'tradicional'\n      ? config['colaborador_captacion_tradicional_tarifa']\n      : config['colaborador_captacion_tarifa'];\n    const tarifaExtra = config['colaborador_captacion_visita_extra'];\n    const maxExtra = config['colaborador_captacion_visitas_extra_max'];\n    importe = tarifaBase;\n    detalle = `Tarifa base captación (${s.tipo_gestion_default}): ${tarifaBase}€`;\n    if (s.formalizado === false && s.num_visitas > visitasIncluidas) {\n      const visitasExtra = Math.min(s.num_visitas - visitasIncluidas, maxExtra);\n      const importeExtra = visitasExtra * tarifaExtra;\n      importe += importeExtra;\n      detalle += ` + ${visitasExtra} visitas extra × ${tarifaExtra}€ = ${importeExtra}€`;\n    }\n  }\n  else if (s.tipo_servicio === 'incidencia') {\n    const tarifaHora = config['colaborador_incidencia_tarifa_hora'];\n    const minimoHoras = config['colaborador_incidencia_minimo_horas'];\n    const horasFacturadas = Math.max(parseFloat(s.horas), minimoHoras);\n    importe = horasFacturadas * tarifaHora;\n    detalle = `${horasFacturadas}h × ${tarifaHora}€/h (mínimo ${minimoHoras}h aplicado: ${parseFloat(s.horas) < minimoHoras})`;\n  }\n  else if (s.tipo_servicio === 'salida_completa') {\n    importe = config['colaborador_salida_vivienda_completa'];\n    detalle = 'Tarifa fija salida vivienda completa';\n  }\n  else if (s.tipo_servicio === 'salida_habitacion') {\n    importe = config['colaborador_salida_habitacion'];\n    detalle = 'Tarifa fija salida habitación';\n  }\n  else if (s.tipo_servicio === 'visita_adicional') {\n    const tarifaExtra = config['colaborador_captacion_visita_extra'];\n    importe = s.num_visitas * tarifaExtra;\n    detalle = `${s.num_visitas} visitas adicionales × ${tarifaExtra}€`;\n  }\n  else if (s.tipo_servicio === 'servicio_adicional') {\n    const tarifaHora = config['colaborador_servicio_adicional_tarifa_hora'];\n    const minimoMin = config['colaborador_servicio_adicional_minimo_min'];\n    const minimoHoras = minimoMin / 60;\n    const horasFacturadas = Math.max(parseFloat(s.horas), minimoHoras);\n    importe = horasFacturadas * tarifaHora;\n    detalle = `${horasFacturadas.toFixed(2)}h × ${tarifaHora}€/h (mínimo ${minimoMin}min aplicado: ${parseFloat(s.horas) * 60 < minimoMin})`;\n  }\n  result.push({\n    json: {\n      id: s.id,\n      tipo_servicio: s.tipo_servicio,\n      importe_calculado: Math.round(importe * 100) / 100,\n      detalle: detalle\n    }\n  });\n}\nreturn result;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        720,
+        560
+      ],
+      "id": "db83c197-4a3d-45ec-b95c-edba83a78481",
+      "name": "Calcular Comisiones Colaborador"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE colaborador_servicios\nSET importe_calculado = {{ $json.importe_calculado }}\nWHERE id = {{ $json.id }};",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1136,
+        416
+      ],
+      "id": "76986736-dba2-44ab-a84b-77cdfa6d07ab",
+      "name": "Actualizar Importe Colaborador",
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_ME",
+          "name": "postgres (replace)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $('Calcular Comisiones Colaborador').all();\nconst total = items.reduce((sum, i) => sum + parseFloat(i.json.importe_calculado || 0), 0);\n\nreturn [{\n  json: {\n    servicios_procesados: items.length,\n    total_calculado: Math.round(total * 100) / 100\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1328,
+        576
+      ],
+      "id": "7bb3d8f2-dc4d-47de-bcb6-24e5b8ce0cfc",
+      "name": "Preparar Log"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "rWsQVLC3hGipY6oO",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/rWsQVLC3hGipY6oO",
+          "cachedResultName": "Logs - Subworkflow"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "duracion_ms": 0,
+            "workflow_origen": "Workflow 4 - Colaboradores",
+            "tipo_evento": "info",
+            "payload": "={{ JSON.stringify($json) }}",
+            "inicio": "={{ $now.toISO() }}",
+            "fin": "={{ $now.toISO() }}",
+            "errores_detectados": 0,
+            "disparado_por": "manual",
+            "propiedades_procesadas": "={{ $json.servicios_procesados }}",
+            "liquidaciones_generadas": 0
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "workflow_origen",
+              "displayName": "workflow_origen",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "tipo_evento",
+              "displayName": "tipo_evento",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "disparado_por",
+              "displayName": "disparado_por",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "inicio",
+              "displayName": "inicio",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "fin",
+              "displayName": "fin",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "duracion_ms",
+              "displayName": "duracion_ms",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "number",
+              "removed": false
+            },
+            {
+              "id": "propiedades_procesadas",
+              "displayName": "propiedades_procesadas",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "number",
+              "removed": false
+            },
+            {
+              "id": "liquidaciones_generadas",
+              "displayName": "liquidaciones_generadas",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "number",
+              "removed": false
+            },
+            {
+              "id": "errores_detectados",
+              "displayName": "errores_detectados",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "number",
+              "removed": false
+            },
+            {
+              "id": "payload",
+              "displayName": "payload",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        1536,
+        576
+      ],
+      "id": "f11efd33-017a-4d18-9eaa-5f953cebedaa",
+      "name": "Execute Workflow (Logs)"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "92106af4-3491-4f11-a3c0-3d7497a0d7e0",
+              "leftValue": "={{ $json.sin_servicios_que_calcular }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "empty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        928,
+        560
+      ],
+      "id": "ed6bb0d7-cfb4-4927-b13c-16e9dec657df",
+      "name": "Hay Servicios Que Calcular"
+    },
+    {
+      "parameters": {
+        "content": "## Workflow 4 · Colaboradores\n**Fase:** 2 · Preparación\n\n**Qué hace**\nCalcula el importe de los servicios de colaboradores pendientes.\n\n**Cómo funciona**\n- Tipos: captación, incidencia, salida y servicio adicional.\n- Las tarifas salen de la tabla `configuracion` (claves `colaborador_*`). No hay importes en el código.\n- Cada servicio puede ser coste interno o repercutible al propietario.\n\n**Siguiente:** Workflow 5 (Motor de Reglas)\n**Tablas:** `colaboradores`, `colaborador_servicios`, `configuracion`",
+        "height": 416,
+        "width": 880,
+        "color": 4
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        0,
+        0
+      ],
+      "typeVersion": 1,
+      "id": "f1986869-7624-4adc-8d0f-5320eaf6ea05",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        64,
+        576
+      ],
+      "id": "6a98f800-7ff8-46f7-aa3f-51000ce40c76",
+      "name": "When Executed by Another Workflow"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "T1CS6bpxTvX7iZty",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/T1CS6bpxTvX7iZty",
+          "cachedResultName": "Workflow 5 - Motor de Reglas"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        1728,
+        576
+      ],
+      "id": "1867159c-4c2e-45c8-89c4-6c27abc3d176",
+      "name": "Execute Workflow (Workflow 5)"
+    }
+  ],
+  "connections": {
+    "Leer Config Colaboradores": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Leer Servicios Colaborador": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "Calcular Comisiones Colaborador",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calcular Comisiones Colaborador": {
+      "main": [
+        [
+          {
+            "node": "Hay Servicios Que Calcular",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Actualizar Importe Colaborador": {
+      "main": [
+        [
+          {
+            "node": "Preparar Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar Log": {
+      "main": [
+        [
+          {
+            "node": "Execute Workflow (Logs)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute Workflow (Logs)": {
+      "main": [
+        [
+          {
+            "node": "Execute Workflow (Workflow 5)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Hay Servicios Que Calcular": {
+      "main": [
+        [
+          {
+            "node": "Actualizar Importe Colaborador",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "Leer Config Colaboradores",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Leer Servicios Colaborador",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "timeSavedMode": "fixed",
+    "timezone": "Europe/Madrid",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false,
+    "errorWorkflow": "nzlatDFUYGWhzgoh"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "id": "FQ9ER9bhOr305QsK",
+  "tags": [
+    {
+      "name": "subworkflow"
+    },
+    {
+      "name": "liquidaciones"
+    },
+    {
+      "name": "2-preparación"
+    }
+  ]
+}

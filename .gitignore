@@ -1,0 +1,5 @@
+.env
+*.sql.gz
+*.zip
+*.7z
+client_secret*.json

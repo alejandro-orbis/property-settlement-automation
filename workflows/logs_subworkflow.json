@@ -1,0 +1,270 @@
+{
+  "name": "Logs - Subworkflow",
+  "nodes": [
+    {
+      "parameters": {
+        "schema": {
+          "__rl": true,
+          "mode": "list",
+          "value": "public"
+        },
+        "table": {
+          "__rl": true,
+          "value": "logs",
+          "mode": "list",
+          "cachedResultName": "logs"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "duracion_ms": "={{ $json.duracion_ms }}",
+            "propiedades_procesadas": "={{ $json.propiedades_procesadas }}",
+            "liquidaciones_generadas": "={{ $json.liquidaciones_generadas }}",
+            "errores_detectados": "={{ $json.errores_detectados }}",
+            "workflow_origen": "={{ $json.workflow_origen }}",
+            "tipo_evento": "={{ $json.tipo_evento }}",
+            "disparado_por": "={{ $json.disparado_por }}",
+            "payload": "={{ $json.payload }}",
+            "inicio": "={{ $json.inicio }}",
+            "fin": "={{ $json.fin }}"
+          },
+          "matchingColumns": [
+            "id"
+          ],
+          "schema": [
+            {
+              "id": "id",
+              "displayName": "id",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "workflow_origen",
+              "displayName": "workflow_origen",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "tipo_evento",
+              "displayName": "tipo_evento",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "disparado_por",
+              "displayName": "disparado_por",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "inicio",
+              "displayName": "inicio",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "fin",
+              "displayName": "fin",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "duracion_ms",
+              "displayName": "duracion_ms",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "propiedades_procesadas",
+              "displayName": "propiedades_procesadas",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "liquidaciones_generadas",
+              "displayName": "liquidaciones_generadas",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "errores_detectados",
+              "displayName": "errores_detectados",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "payload",
+              "displayName": "payload",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "object",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "creado_en",
+              "displayName": "creado_en",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": true,
+              "removed": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        272,
+        496
+      ],
+      "id": "abd92937-9a89-4b76-a974-1ed18ed73cb5",
+      "name": "Insert rows in a table",
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_ME",
+          "name": "postgres (replace)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Logs · Subworkflow\n**Fase:** Soporte\n\n**Qué hace**\nRegistra en la tabla `logs` la actividad de cada workflow (inicio, fin, volumen, errores controlados).\n\n**Cómo se usa**\nLos workflows lo llaman con un nodo Execute Workflow. No tiene trigger propio.\n\n**Consulta útil:** `SELECT * FROM logs ORDER BY id DESC LIMIT 50;`",
+        "height": 400,
+        "width": 832,
+        "color": 5
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        0,
+        0
+      ],
+      "typeVersion": 1,
+      "id": "7cdc7df0-f771-4259-a2c8-1e5a6b5d84da",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "workflow_origen"
+            },
+            {
+              "name": "tipo_evento"
+            },
+            {
+              "name": "disparado_por"
+            },
+            {
+              "name": "inicio"
+            },
+            {
+              "name": "fin"
+            },
+            {
+              "name": "duracion_ms",
+              "type": "number"
+            },
+            {
+              "name": "propiedades_procesadas",
+              "type": "number"
+            },
+            {
+              "name": "liquidaciones_generadas",
+              "type": "number"
+            },
+            {
+              "name": "errores_detectados",
+              "type": "number"
+            },
+            {
+              "name": "payload"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        32,
+        496
+      ],
+      "id": "4304cf6b-31b4-41e3-8995-3ea731e1f9a3",
+      "name": "When Executed by Another Workflow"
+    }
+  ],
+  "connections": {
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "Insert rows in a table",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "timeSavedMode": "fixed",
+    "timezone": "Europe/Madrid",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "id": "rWsQVLC3hGipY6oO",
+  "tags": [
+    {
+      "name": "soporte"
+    },
+    {
+      "name": "subworkflow"
+    },
+    {
+      "name": "liquidaciones"
+    }
+  ]
+}

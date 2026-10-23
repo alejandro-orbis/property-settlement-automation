@@ -1,0 +1,474 @@
+{
+  "name": "Workflow 3 - Validacion",
+  "nodes": [
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT id, propiedad_id, de_a, monto, tipo, fecha, estado, 'movimiento' AS origen\nFROM movimientos\nWHERE estado_validacion = 'pendiente_validar';",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        256,
+        672
+      ],
+      "id": "c78005d8-20de-4a8e-890b-e63592e8a29a",
+      "name": "Leer Movimientos Pendientes",
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_ME",
+          "name": "postgres (replace)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT id, propiedad_id, de_a, monto, 'regularizacion' AS origen\nFROM regularizacion_bancaria;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        256,
+        880
+      ],
+      "id": "a24ab54b-0f88-45d2-b365-2144d00bd206",
+      "name": "Leer Regularizacion Bancaria",
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_ME",
+          "name": "postgres (replace)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all().map(i => i.json);\n\nconst movimientos = items.filter(i => i.origen === 'movimiento');\nconst regularizaciones = items.filter(i => i.origen === 'regularizacion');\n\nif (movimientos.length === 0) {\n  return [{ json: { sin_movimientos_que_validar: true } }];\n}\n\nfunction key(propId, deA) {\n  return `${propId}::${(deA || '').trim().toLowerCase()}`;\n}\n\nconst regPool = {};\nfor (const r of regularizaciones) {\n  const k = key(r.propiedad_id, r.de_a);\n  if (!regPool[k]) regPool[k] = [];\n  regPool[k].push({ id: r.id, monto: parseFloat(r.monto), used: false });\n}\n\nconst movByPerson = {};\nfor (const m of movimientos) {\n  const k = key(m.propiedad_id, m.de_a);\n  if (!movByPerson[k]) movByPerson[k] = [];\n  movByPerson[k].push(m);\n}\n\nconst results = [];\nfor (const k in movByPerson) {\n  const regs = regPool[k] || [];\n  for (const m of movByPerson[k]) {\n    const montoM = parseFloat(m.monto);\n    const exact = regs.find(r => !r.used && Math.abs(r.monto - montoM) < 0.01);\n    if (exact) {\n      exact.used = true;\n      results.push({ json: { movimiento_id: m.id, estado_validacion: 'validado', nota: `Coincidencia exacta con regularización #${exact.id} (${exact.monto}€)`, _pending: false } });\n    } else {\n      results.push({ json: { movimiento_id: m.id, estado_validacion: null, _pending: true, _monto: montoM, _key: k } });\n    }\n  }\n}\n\nfor (const k in movByPerson) {\n  const pendientes = results.filter(r => r.json._pending && r.json._key === k);\n  if (pendientes.length === 0) continue;\n  const regsSinUsar = (regPool[k] || []).filter(r => !r.used);\n  const sumaPendientes = pendientes.reduce((s, r) => s + r.json._monto, 0);\n  const sumaRegsSinUsar = regsSinUsar.reduce((s, r) => s + r.monto, 0);\n\n  if (regsSinUsar.length > 0 && Math.abs(sumaPendientes - sumaRegsSinUsar) < 0.01) {\n    for (const r of pendientes) {\n      r.json.estado_validacion = 'validado';\n      r.json.nota = `Coincide como parte de transferencia agrupada (suma total ${sumaRegsSinUsar}€: regularización(es) #${regsSinUsar.map(x => x.id).join(', ')})`;\n    }\n  } else {\n    const esPagoParcialClaro = regsSinUsar.length === 1 && pendientes.length === 1 && regsSinUsar[0].monto > 0 && regsSinUsar[0].monto < pendientes[0].json._monto;\n    for (const r of pendientes) {\n      if (esPagoParcialClaro) {\n        const pagado = regsSinUsar[0].monto;\n        const pendiente = Math.round((r.json._monto - pagado) * 100) / 100;\n        r.json.estado_validacion = 'pago_parcial';\n        r.json.nota = `Pago parcial: esperado ${r.json._monto}€, pagado ${pagado}€, pendiente ${pendiente}€`;\n        r.json.monto_cobrado = pagado;\n      } else {\n        r.json.estado_validacion = regsSinUsar.length > 0 ? 'descuadrado' : 'pendiente_validar';\n        r.json.nota = regsSinUsar.length > 0\n          ? `Existe movimiento bancario del mismo pagador pero el importe no cuadra (esperado ${r.json._monto}€, banco disponible ${sumaRegsSinUsar}€) — revisar manualmente`\n          : 'No se encontró ningún movimiento bancario correspondiente';\n      }\n    }\n  }\n}\n\nreturn results.map(r => ({\n  json: {\n    movimiento_id: r.json.movimiento_id,\n    estado_validacion: r.json.estado_validacion,\n    nota: r.json.nota,\n    monto_cobrado: r.json.monto_cobrado || null\n  }\n}));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        720,
+        752
+      ],
+      "id": "0f9c5d5b-121f-4f5d-87e5-e2bbe3003d7c",
+      "name": "Matching Inteligente"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        512,
+        752
+      ],
+      "id": "46fbb591-4b24-4ca3-99be-7835951c6573",
+      "name": "Merge"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE movimientos\nSET estado_validacion = '{{ $json.estado_validacion }}',\n    monto_cobrado = {{ $json.monto_cobrado || 'NULL' }}\nWHERE id = {{ $json.movimiento_id }};",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1120,
+        592
+      ],
+      "id": "d2b00c23-67a1-4ccd-9588-a3230fa84be3",
+      "name": "Actualizar Estado Validacion",
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_ME",
+          "name": "postgres (replace)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $('Matching Inteligente').all();\nconst validados = items.filter(i => i.json.estado_validacion === 'validado').length;\nconst descuadrados = items.filter(i => i.json.estado_validacion === 'descuadrado').length;\nconst parciales = items.filter(i => i.json.estado_validacion === 'pago_parcial').length;\nconst pendientes = items.filter(i => i.json.estado_validacion === 'pendiente_validar').length;\n\nreturn [{\n  json: {\n    total_procesados: items.length,\n    validados, descuadrados, parciales, pendientes\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1328,
+        768
+      ],
+      "id": "3cd311dc-7239-4a31-ae3d-369b15273ca9",
+      "name": "Preparar Log"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "rWsQVLC3hGipY6oO",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/rWsQVLC3hGipY6oO",
+          "cachedResultName": "Logs - Subworkflow"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "duracion_ms": 0,
+            "workflow_origen": "Workflow 3 - Validacion",
+            "tipo_evento": "info",
+            "errores_detectados": "={{ $json.descuadrados + $json.pendientes }}",
+            "payload": "={{ JSON.stringify($json) }}",
+            "inicio": "={{ $now.toISO() }}",
+            "fin": "={{ $now.toISO() }}",
+            "disparado_por": "manual",
+            "liquidaciones_generadas": 1,
+            "propiedades_procesadas": 1
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "workflow_origen",
+              "displayName": "workflow_origen",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "tipo_evento",
+              "displayName": "tipo_evento",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "disparado_por",
+              "displayName": "disparado_por",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "inicio",
+              "displayName": "inicio",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "fin",
+              "displayName": "fin",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "duracion_ms",
+              "displayName": "duracion_ms",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "number",
+              "removed": false
+            },
+            {
+              "id": "propiedades_procesadas",
+              "displayName": "propiedades_procesadas",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "number",
+              "removed": false
+            },
+            {
+              "id": "liquidaciones_generadas",
+              "displayName": "liquidaciones_generadas",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "number",
+              "removed": false
+            },
+            {
+              "id": "errores_detectados",
+              "displayName": "errores_detectados",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "number",
+              "removed": false
+            },
+            {
+              "id": "payload",
+              "displayName": "payload",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        1520,
+        768
+      ],
+      "id": "ebc02cc3-7b62-4598-ba0e-e58a0c296951",
+      "name": "Execute Workflow (Logs)"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "e55caed2-a3bf-4be7-9d67-70f22f26ac2c",
+              "leftValue": "={{ $json.sin_movimientos_que_validar }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "empty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        912,
+        752
+      ],
+      "id": "03be9d7d-c8a3-4e9c-a6d7-b74607d86299",
+      "name": "Hay Movimientos Que Validar"
+    },
+    {
+      "parameters": {
+        "content": "## Workflow 3 · Validación\n**Fase:** 2 · Preparación\n\n**Qué hace**\nContrasta cada movimiento con el extracto bancario y fija su `estado_validacion`.\n\n**Estados**\n- `validado`: coincide exactamente.\n- `descuadrado`: no coincide y no se sabe por qué.\n- `pago_parcial`: pagador conocido con importe menor.\n- `pendiente_validar`: no hay movimiento bancario correspondiente.\n\n**Importante:** el Motor de Reglas solo usa los movimientos `validado`.\n\n**Siguiente:** Workflow 4 (Colaboradores)",
+        "height": 496,
+        "width": 1008,
+        "color": 4
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        0,
+        0
+      ],
+      "typeVersion": 1,
+      "id": "6eb2b963-cbdb-4e54-b402-55d7cf2c47b9",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -16,
+        768
+      ],
+      "id": "4fdf7f21-6730-4652-9994-594a39dad1ab",
+      "name": "When Executed by Another Workflow"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "FQ9ER9bhOr305QsK",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/FQ9ER9bhOr305QsK",
+          "cachedResultName": "Workflow 4 - Colaboradores"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        1712,
+        768
+      ],
+      "id": "d05ec8e9-ede3-4305-a054-f4037b7bac47",
+      "name": "Execute Workflow (Workflow 4)"
+    }
+  ],
+  "connections": {
+    "Leer Movimientos Pendientes": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Leer Regularizacion Bancaria": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "Matching Inteligente",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Matching Inteligente": {
+      "main": [
+        [
+          {
+            "node": "Hay Movimientos Que Validar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Actualizar Estado Validacion": {
+      "main": [
+        [
+          {
+            "node": "Preparar Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar Log": {
+      "main": [
+        [
+          {
+            "node": "Execute Workflow (Logs)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute Workflow (Logs)": {
+      "main": [
+        [
+          {
+            "node": "Execute Workflow (Workflow 4)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Hay Movimientos Que Validar": {
+      "main": [
+        [
+          {
+            "node": "Actualizar Estado Validacion",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "Leer Movimientos Pendientes",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Leer Regularizacion Bancaria",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "timeSavedMode": "fixed",
+    "timezone": "Europe/Madrid",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false,
+    "errorWorkflow": "nzlatDFUYGWhzgoh"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "id": "6aJMktu3AAnkUupC",
+  "tags": [
+    {
+      "name": "subworkflow"
+    },
+    {
+      "name": "liquidaciones"
+    },
+    {
+      "name": "2-preparación"
+    }
+  ]
+}

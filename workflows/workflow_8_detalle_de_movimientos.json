@@ -1,0 +1,262 @@
+{
+  "name": "Workflow 8 - Detalle de Movimientos",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        80,
+        544
+      ],
+      "id": "204c421e-3a02-4126-9ae5-77224cd197e6",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT\n  m.fecha,\n  p.direccion,\n  pr.nombre AS propietario,\n  m.tipo,\n  m.monto,\n  m.estado_validacion,\n  m.descripcion\nFROM movimientos m\nJOIN propiedades p ON p.id = m.propiedad_id\nLEFT JOIN propietarios pr ON pr.id = p.propietario_id\nORDER BY m.fecha DESC, p.direccion;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        288,
+        544
+      ],
+      "id": "a77433a0-16bc-4145-8122-2f323a4595ca",
+      "name": "Leer Detalle Movimientos",
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_ME",
+          "name": "postgres (replace)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "clear",
+        "documentId": {
+          "__rl": true,
+          "value": "REPLACE_WITH_YOUR_DOCUMENTID",
+          "mode": "list",
+          "cachedResultName": "(replace)",
+          "cachedResultUrl": "(replace)"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Hoja 1",
+          "cachedResultUrl": "https://example.com/path"
+        },
+        "clear": "specificRows",
+        "startIndex": 2,
+        "rowsToDelete": 10000
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        496,
+        544
+      ],
+      "id": "75424566-8671-4700-8f2d-3cb8c59b77d1",
+      "name": "Limpiar Panel Detalle",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REPLACE_ME",
+          "name": "googleSheetsOAuth2Api (replace)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "REPLACE_WITH_YOUR_DOCUMENTID",
+          "mode": "list",
+          "cachedResultName": "(replace)",
+          "cachedResultUrl": "(replace)"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Hoja 1",
+          "cachedResultUrl": "https://example.com/path"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Fecha": "={{ $json.fecha }}",
+            "Propiedad": "={{ $json.direccion }}",
+            "Propietario": "={{ $json.propietario }}",
+            "Tipo": "={{ $json.tipo }}",
+            "Importe": "={{ $json.monto }}",
+            "Estado": "={{ $json.estado_validacion }}",
+            "Descripción": "={{ $json.descripcion }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "Fecha",
+              "displayName": "Fecha",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Propiedad",
+              "displayName": "Propiedad",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Propietario",
+              "displayName": "Propietario",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Tipo",
+              "displayName": "Tipo",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Importe",
+              "displayName": "Importe",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Estado",
+              "displayName": "Estado",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Descripción",
+              "displayName": "Descripción",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        704,
+        544
+      ],
+      "id": "3fa9ed33-af16-41fc-a611-25d57365b835",
+      "name": "Actualizar Panel Detalle",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REPLACE_ME",
+          "name": "googleSheetsOAuth2Api (replace)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Workflow 8 · Detalle de Movimientos\n**Fase:** 4 · Salida · MANUAL\n\n**Qué hace**\nVuelca cada movimiento individual (fecha, propiedad, propietario, tipo, importe, estado, descripción) a una hoja de Google Sheets, para consultar un movimiento sin pasar por los resúmenes.\n\n**Cómo funciona**\nLimpia la hoja del panel de detalle y la rellena con Append.\n\n**Cómo se usa:** ejecutar a mano cuando se necesite. No forma parte del ciclo automático.",
+        "height": 432,
+        "width": 1536,
+        "color": 5
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        0,
+        0
+      ],
+      "typeVersion": 1,
+      "id": "bcd3bd70-72f5-426f-9058-ce84fdd128d0",
+      "name": "Sticky Note"
+    }
+  ],
+  "connections": {
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "Leer Detalle Movimientos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Leer Detalle Movimientos": {
+      "main": [
+        [
+          {
+            "node": "Limpiar Panel Detalle",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Limpiar Panel Detalle": {
+      "main": [
+        [
+          {
+            "node": "Actualizar Panel Detalle",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "timeSavedMode": "fixed",
+    "timezone": "Europe/Madrid",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "id": "8YZCWucOZhMtw460",
+  "tags": [
+    {
+      "name": "manual"
+    },
+    {
+      "name": "4-salida"
+    },
+    {
+      "name": "liquidaciones"
+    }
+  ]
+}

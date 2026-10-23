@@ -1,0 +1,509 @@
+{
+  "name": "Workflow 2 - Normalizacion",
+  "nodes": [
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT id, descripcion, fecha\nFROM movimientos\nWHERE periodo_inicio IS NULL\n  AND descripcion ILIKE '%/%-%/%';",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        368,
+        960
+      ],
+      "id": "c5912481-256d-4403-ace9-0adac7bb2676",
+      "name": "Leer Movimientos sin Periodo",
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_ME",
+          "name": "postgres (replace)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst result = [];\n\nfor (const item of items) {\n  const descripcion = item.json.descripcion || '';\n\n  // Busca el patrón DD/MM/YYYY - DD/MM/YYYY en cualquier parte del texto\n  const match = descripcion.match(/(\\d{2}\\/\\d{2}\\/\\d{4})\\s*-\\s*(\\d{2}\\/\\d{2}\\/\\d{4})/);\n\n  let periodoInicio = null;\n  let periodoFin = null;\n\n  if (match) {\n    const [, inicioStr, finStr] = match;\n    const [d1, m1, y1] = inicioStr.split('/');\n    const [d2, m2, y2] = finStr.split('/');\n    periodoInicio = `${y1}-${m1}-${d1}`;\n    periodoFin = `${y2}-${m2}-${d2}`;\n  }\n\n  result.push({\n    json: {\n      id: item.json.id,\n      periodo_inicio: periodoInicio,\n      periodo_fin: periodoFin\n    }\n  });\n}\n\nreturn result;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        576,
+        960
+      ],
+      "id": "c1aabe05-44be-4fe4-b0b1-7218c6f4cfe7",
+      "name": "Extraer Periodo"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE movimientos\nSET periodo_inicio = '{{ $json.periodo_inicio }}',\n    periodo_fin = '{{ $json.periodo_fin }}'\nWHERE id = {{ $json.id }};",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        784,
+        960
+      ],
+      "id": "d4ac6bca-3386-4a7e-a2bd-91236bf1714f",
+      "name": "Actualizar Periodo",
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_ME",
+          "name": "postgres (replace)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const movimientos = $('Leer Gastos Sin Clasificar').all().map(i => i.json);\n\nconst reglas = [\n  { patron: /limpieza|limpiezas/i, categoria: 'Gasto_Limpieza' },\n  { patron: /materiales/i, categoria: 'Gasto_Materiales' },\n  { patron: /el[ée]ctric/i, categoria: 'Gasto_Electricidad' },\n  { patron: /extintor/i, categoria: 'Gasto_MantenimientoSeguridad' },\n  { patron: /telefonillo|aluminio|fontaner|pintura|albañ/i, categoria: 'Gasto_Reparacion' },\n];\n\nconst result = movimientos.map(mov => {\n  const regla = reglas.find(r => r.patron.test(mov.descripcion));\n  const categoria = regla ? regla.categoria : 'Gasto_SinClasificar_Revisar';\n\n  return {\n    json: {\n      id: mov.id,\n      descripcion: mov.descripcion,\n      categoria: categoria,\n      requiere_revision: !regla\n    }\n  };\n});\n\nreturn result;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        576,
+        768
+      ],
+      "id": "c60ce20e-db22-4df6-94f5-832d16eb33b1",
+      "name": "Clasificar Movimientos Bancarios"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT id, propiedad_id, monto, descripcion\nFROM movimientos\nWHERE tipo = 'Gasto_SinClasificar';",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        368,
+        768
+      ],
+      "id": "ba9283d9-b936-4525-998c-c4f369fa47ad",
+      "name": "Leer Gastos Sin Clasificar",
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_ME",
+          "name": "postgres (replace)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE movimientos\nSET tipo = '{{ $json.categoria }}',\n    estado_validacion = {{ $json.requiere_revision ? \"'pendiente_validar'\" : \"'validado'\" }}\nWHERE id = {{ $json.id }};",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        784,
+        768
+      ],
+      "id": "fcedf1fe-2db8-4ebe-b1ee-464ae141ab6c",
+      "name": "Actualizar Categoria Gasto",
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_ME",
+          "name": "postgres (replace)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT id, descripcion, monto\nFROM movimientos\nWHERE propiedad_id IS NULL\n  AND tipo LIKE 'Gasto%';",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        368,
+        1168
+      ],
+      "id": "eb726aa2-7d85-4506-aab8-dbe6afb2ff76",
+      "name": "Leer Gastos Sin Propiedad",
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_ME",
+          "name": "postgres (replace)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT id, codigo_rentila, direccion\nFROM propiedades;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        368,
+        1392
+      ],
+      "id": "41bdc1b8-530f-40a4-9b2d-5e3ee4941d58",
+      "name": "Leer Todas las Direcciones",
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_ME",
+          "name": "postgres (replace)"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        576,
+        1280
+      ],
+      "id": "e57786d7-676d-4087-b8be-68a10512d971",
+      "name": "Merge"
+    },
+    {
+      "parameters": {
+        "jsCode": "const gastos = $('Leer Gastos Sin Propiedad').all().map(i => i.json);\nconst propiedades = $('Leer Todas las Direcciones').all().map(i => i.json);\n\nif (gastos.length === 0) {\n  return [{ json: { sin_gastos_que_resolver: true } }];\n}\n\nfunction normalizar(texto) {\n  return (texto || '')\n    .toLowerCase()\n    .normalize('NFD').replace(/[\\u0300-\\u036f]/g, '')\n    .replace(/[^a-z0-9\\s]/g, ' ')\n    .replace(/\\s+/g, ' ')\n    .trim();\n}\n\nconst PALABRAS_IGNORAR = ['calle', 'avenida', 'plaza', 'piso', 'planta', 'derecha', 'izquierda', 'bajo', 'direccion', 'exacta', 'pendiente', 'confirmar', 'bilbao', 'madrid'];\n\nconst result = gastos.map(g => {\n  const descNorm = normalizar(g.descripcion);\n  let mejorMatch = null;\n  let mejorScore = 0;\n\n  for (const p of propiedades) {\n    const dirNorm = normalizar(p.direccion);\n    const tokens = dirNorm.split(' ').filter(t => t.length >= 4 && !PALABRAS_IGNORAR.includes(t));\n    const score = tokens.filter(t => descNorm.includes(t)).length;\n\n    if (score > mejorScore) {\n      mejorScore = score;\n      mejorMatch = p;\n    }\n  }\n\n  return {\n    json: {\n      movimiento_id: g.id,\n      propiedad_id: mejorScore > 0 ? mejorMatch.id : null,\n      propiedad_direccion: mejorScore > 0 ? mejorMatch.direccion : null,\n      requiere_revision: mejorScore === 0,\n      score: mejorScore\n    }\n  };\n});\n\nreturn result;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        768,
+        1280
+      ],
+      "id": "3083759a-58e5-45a1-bc7c-d2330bba4f2f",
+      "name": "Resolver Propiedad"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE movimientos\nSET propiedad_id = {{ $json.propiedad_id || 'NULL' }},\n    requiere_revision_propiedad = {{ $json.requiere_revision }}\nWHERE id = {{ $json.movimiento_id }};",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1232,
+        1264
+      ],
+      "id": "f95105c5-7994-4d62-bf7d-08097a520558",
+      "name": "Actualizar Propiedad Gasto",
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_ME",
+          "name": "postgres (replace)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "6aJMktu3AAnkUupC",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/6aJMktu3AAnkUupC",
+          "cachedResultName": "Workflow 3 - Validacion"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        1648,
+        976
+      ],
+      "id": "f85a2b98-9f9a-4d01-a490-9fcf56c58261",
+      "name": "Execute Workflow (Workflow 3)"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "7ce75999-d6a3-45fa-ac93-f0049e3dcebb",
+              "leftValue": "={{ $json.sin_gastos_que_resolver }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "empty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        976,
+        1280
+      ],
+      "id": "33a2b009-43fe-493c-905b-3397106ed44d",
+      "name": "Hay Gastos Que Resolver"
+    },
+    {
+      "parameters": {
+        "content": "## Workflow 2 · Normalización\n**Fase:** 2 · Preparación\n\n**Qué hace**\nDeja los movimientos listos para validar y calcular.\n\n**Cómo funciona** (dos tareas en paralelo)\n- Extrae el periodo del contrato (fechas) del texto libre de cada movimiento.\n- Clasifica los gastos por palabras clave (limpieza, materiales, electricidad, reparación) y asigna propiedad cuando `propiedad_id IS NULL`, comparando el texto con las direcciones del maestro.\n\nProcesa igual los gastos de Rentila, del banco y del Excel.\n\n**Siguiente:** Workflow 3 (Validación)\n**Si falla la asignación:** el gasto queda con `requiere_revision_propiedad` y se resuelve en el Panel de Revisión.",
+        "height": 576,
+        "width": 1536,
+        "color": 4
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        0,
+        0
+      ],
+      "typeVersion": 1,
+      "id": "54590375-7090-46e4-917c-da6482139f0e",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        80,
+        1072
+      ],
+      "id": "b1f193f2-d69c-4b66-bda1-2c71f3037e2c",
+      "name": "When Executed by Another Workflow"
+    },
+    {
+      "parameters": {
+        "numberInputs": 3
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        1440,
+        960
+      ],
+      "id": "ba2a3a02-b0b6-448f-8bef-71e11bd0b079",
+      "name": "Merge (Actualizar Categoría + Propiedad)"
+    }
+  ],
+  "connections": {
+    "Leer Movimientos sin Periodo": {
+      "main": [
+        [
+          {
+            "node": "Extraer Periodo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extraer Periodo": {
+      "main": [
+        [
+          {
+            "node": "Actualizar Periodo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Leer Gastos Sin Clasificar": {
+      "main": [
+        [
+          {
+            "node": "Clasificar Movimientos Bancarios",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Clasificar Movimientos Bancarios": {
+      "main": [
+        [
+          {
+            "node": "Actualizar Categoria Gasto",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Leer Gastos Sin Propiedad": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Leer Todas las Direcciones": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "Resolver Propiedad",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resolver Propiedad": {
+      "main": [
+        [
+          {
+            "node": "Hay Gastos Que Resolver",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Actualizar Categoria Gasto": {
+      "main": [
+        [
+          {
+            "node": "Merge (Actualizar Categoría + Propiedad)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Actualizar Periodo": {
+      "main": [
+        [
+          {
+            "node": "Merge (Actualizar Categoría + Propiedad)",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Actualizar Propiedad Gasto": {
+      "main": [
+        [
+          {
+            "node": "Merge (Actualizar Categoría + Propiedad)",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "Hay Gastos Que Resolver": {
+      "main": [
+        [
+          {
+            "node": "Actualizar Propiedad Gasto",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Merge (Actualizar Categoría + Propiedad)",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "Leer Gastos Sin Clasificar",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Leer Movimientos sin Periodo",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Leer Gastos Sin Propiedad",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Leer Todas las Direcciones",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge (Actualizar Categoría + Propiedad)": {
+      "main": [
+        [
+          {
+            "node": "Execute Workflow (Workflow 3)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "timeSavedMode": "fixed",
+    "errorWorkflow": "nzlatDFUYGWhzgoh",
+    "timezone": "Europe/Madrid",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "id": "NA2amEDgkes8DXaq",
+  "tags": [
+    {
+      "name": "subworkflow"
+    },
+    {
+      "name": "liquidaciones"
+    },
+    {
+      "name": "2-preparación"
+    }
+  ]
+}

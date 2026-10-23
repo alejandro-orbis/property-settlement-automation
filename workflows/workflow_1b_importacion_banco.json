@@ -1,0 +1,416 @@
+{
+  "name": "Workflow 1B - Importacion Banco",
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyHour"
+            }
+          ]
+        },
+        "triggerOn": "specificFolder",
+        "folderToWatch": {
+          "__rl": true,
+          "value": "REPLACE_WITH_YOUR_ID",
+          "mode": "list",
+          "cachedResultName": "Extracto Bancario",
+          "cachedResultUrl": "https://example.com/path"
+        },
+        "event": "fileCreated",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleDriveTrigger",
+      "typeVersion": 1,
+      "position": [
+        80,
+        672
+      ],
+      "id": "a4c7fa73-66cd-4718-bf26-821caa3c99f4",
+      "name": "Google Drive Trigger",
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "REPLACE_ME",
+          "name": "googleDriveOAuth2Api (replace)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "xlsx",
+        "options": {
+          "headerRow": true,
+          "sheetName": "Transacciones"
+        }
+      },
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1.1,
+      "position": [
+        496,
+        672
+      ],
+      "id": "f0fa7ed1-d7cd-40ce-a666-416cde85770a",
+      "name": "Extract from File"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst result = [];\n\nfor (const item of items) {\n  const row = item.json;\n  const importe = parseFloat(row['Importe']);\n\n  // Solo procesamos gastos (importes negativos) — los ingresos ya vienen de Rentila\n  if (isNaN(importe) || importe >= 0) continue;\n\n  const idBanco = row['ID de transacción'] || row['ID de transaccion'];\n  if (!idBanco) continue; // sin ID de transacción no podemos garantizar que no se duplique\n\nlet fecha = row['Fecha'];\nif (typeof fecha === 'number') {\n  const utc_days = Math.floor(fecha - 25569);\n  const utc_value = utc_days * 86400;\n  fecha = new Date(utc_value * 1000).toISOString().split('T')[0];\n} else if (fecha instanceof Date) {\n  fecha = fecha.toISOString().split('T')[0];\n} else if (typeof fecha === 'string' && fecha.includes('.')) {\n  const [d, m, y] = fecha.split('.');\n  fecha = `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;\n}\n\n  result.push({\n    json: {\n      id_transaccion_banco: String(idBanco),\n      fecha: fecha,\n      de_a: (row['Descripción'] || row['Descripcion'] || '').substring(0, 200),\n      monto: Math.abs(importe),\n      descripcion: row['Descripción'] || row['Descripcion'] || ''\n    }\n  });\n}\n\nreturn result;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        704,
+        672
+      ],
+      "id": "54ae28d0-bbe5-4cff-8fe8-365f3e8990b1",
+      "name": "Parsear Extracto Bancario"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO movimientos (propiedad_id, fecha, de_a, monto, tipo, descripcion, estado, estado_validacion, id_transaccion_banco)\nVALUES (\n  NULL,\n  '{{ $json.fecha }}',\n  '{{ $json.de_a.replace(/'/g, \"''\") }}',\n  {{ $json.monto }},\n  'Gasto_SinClasificar',\n  '{{ $json.descripcion.replace(/'/g, \"''\") }}',\n  'Pagado',\n  'validado',\n  '{{ $json.id_transaccion_banco }}'\n)\nON CONFLICT (id_transaccion_banco) DO NOTHING;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        912,
+        672
+      ],
+      "id": "60e30dc3-d07f-4255-9164-306a4da81043",
+      "name": "Insert Gasto Bancario",
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_ME",
+          "name": "postgres (replace)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "download",
+        "fileId": {
+          "__rl": true,
+          "value": "REPLACE_WITH_YOUR_FILEID",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        288,
+        672
+      ],
+      "id": "4ab4e855-37e4-4853-ad22-745d8d9d5656",
+      "name": "Download",
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "REPLACE_ME",
+          "name": "googleDriveOAuth2Api (replace)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $('Parsear Extracto Bancario').all();\n\nreturn [{\n  json: {\n    gastos_procesados: items.length,\n    total_importado: Math.round(items.reduce((sum, i) => sum + parseFloat(i.json.monto || 0), 0) * 100) / 100\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        672
+      ],
+      "id": "bce623c4-000d-4ca0-a402-242044f853ae",
+      "name": "Preparar Log"
+    },
+    {
+      "parameters": {
+        "content": "## Workflow 1B · Extracto bancario\n**Fase:** 1 · Entrada de datos\n\n**Qué hace**\nImporta los gastos del extracto bancario.\n\n**Cómo funciona**\n1. Drive Trigger sobre una carpeta propia, distinta de la de Rentila.\n2. Extrae solo los movimientos negativos (gastos). Los ingresos ya llegan por Rentila.\n3. Inserta en `movimientos` con `propiedad_id = NULL`. El Workflow 2 lo resuelve después.\n4. Antiduplicados: `id_transaccion_banco`, que asigna el propio banco.\n\n**Siguiente:** Workflow 2 (Normalización)\n**Ojo:** comprobar que el workflow está activo. Si no, los gastos del banco no entran.",
+        "height": 512,
+        "width": 800
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        0,
+        0
+      ],
+      "typeVersion": 1,
+      "id": "5a5124a4-9beb-4a3e-832d-486d006504fe",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "rWsQVLC3hGipY6oO",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/rWsQVLC3hGipY6oO",
+          "cachedResultName": "Logs - Subworkflow"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "duracion_ms": 0,
+            "propiedades_procesadas": 0,
+            "liquidaciones_generadas": 0,
+            "errores_detectados": 0,
+            "workflow_origen": "Workflow 1B - Importacion Banco",
+            "tipo_evento": "info",
+            "disparado_por": "automatico",
+            "inicio": "={{ $now.toISO() }}",
+            "fin": "={{ $now.toISO() }}",
+            "payload": "={{ JSON.stringify($json) }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "workflow_origen",
+              "displayName": "workflow_origen",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "tipo_evento",
+              "displayName": "tipo_evento",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "disparado_por",
+              "displayName": "disparado_por",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "inicio",
+              "displayName": "inicio",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "fin",
+              "displayName": "fin",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "duracion_ms",
+              "displayName": "duracion_ms",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "number",
+              "removed": false
+            },
+            {
+              "id": "propiedades_procesadas",
+              "displayName": "propiedades_procesadas",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "number",
+              "removed": false
+            },
+            {
+              "id": "liquidaciones_generadas",
+              "displayName": "liquidaciones_generadas",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "number",
+              "removed": false
+            },
+            {
+              "id": "errores_detectados",
+              "displayName": "errores_detectados",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "number",
+              "removed": false
+            },
+            {
+              "id": "payload",
+              "displayName": "payload",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        1328,
+        672
+      ],
+      "id": "01f10f73-6bb8-4880-9a1a-10adc863d1e6",
+      "name": "Execute Workflow (Logs)"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "NA2amEDgkes8DXaq",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/NA2amEDgkes8DXaq",
+          "cachedResultName": "Workflow 2 - Normalizacion"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        1552,
+        672
+      ],
+      "id": "ad2156a1-2ac2-4bcc-89e8-c926ce72014e",
+      "name": "Execute Workflow (Workflow 2)"
+    }
+  ],
+  "connections": {
+    "Google Drive Trigger": {
+      "main": [
+        [
+          {
+            "node": "Download",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract from File": {
+      "main": [
+        [
+          {
+            "node": "Parsear Extracto Bancario",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parsear Extracto Bancario": {
+      "main": [
+        [
+          {
+            "node": "Insert Gasto Bancario",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download": {
+      "main": [
+        [
+          {
+            "node": "Extract from File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert Gasto Bancario": {
+      "main": [
+        [
+          {
+            "node": "Preparar Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar Log": {
+      "main": [
+        [
+          {
+            "node": "Execute Workflow (Logs)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute Workflow (Logs)": {
+      "main": [
+        [
+          {
+            "node": "Execute Workflow (Workflow 2)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "timeSavedMode": "fixed",
+    "timezone": "Europe/Madrid",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false,
+    "errorWorkflow": "nzlatDFUYGWhzgoh"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "id": "MQDHmuz8lWIGAy8U",
+  "tags": [
+    {
+      "name": "1-entrada"
+    },
+    {
+      "name": "liquidaciones"
+    },
+    {
+      "name": "automático"
+    }
+  ]
+}
