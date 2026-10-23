@@ -26,7 +26,7 @@ El sistema ejecuta el ciclo completo de forma automática y **marca para revisi�
 
 ## Arquitectura
 
-![Flujo](assets/flow-diagram.png)
+![Flujo](assets/flow-diagram.es.png)
 
 | Workflow | Función |
 |---|---|
